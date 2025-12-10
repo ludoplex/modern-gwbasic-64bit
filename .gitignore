@@ -2,6 +2,9 @@
 *.o
 gwbasic
 
+# CodeQL artifacts
+_codeql_detected_source_root
+
 # Editor files
 *.swp
 *.swo
