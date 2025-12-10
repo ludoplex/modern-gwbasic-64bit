@@ -9,8 +9,8 @@ LDFLAGS = -lm
 ARCH := $(shell uname -m)
 
 # Source files
-C_SOURCES = src/main.c src/program.c src/symbol_table.c
-OBJS = main.o program.o symbol_table.o
+C_SOURCES = src/main.c src/program.c src/symbol_table.c src/expression.c
+OBJS = main.o program.o symbol_table.o expression.o
 
 # Architecture-specific assembly files
 ifeq ($(ARCH),x86_64)
@@ -47,6 +47,9 @@ program.o: src/program.c include/gwbasic.h
 
 symbol_table.o: src/symbol_table.c include/gwbasic.h
 	$(CC) $(CFLAGS) -c src/symbol_table.c -o symbol_table.o
+
+expression.o: src/expression.c include/gwbasic.h
+	$(CC) $(CFLAGS) -c src/expression.c -o expression.o
 
 asm_core_amd64.o: src/asm_core_amd64.S
 	$(AS) src/asm_core_amd64.S -o asm_core_amd64.o

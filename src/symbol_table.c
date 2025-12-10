@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include "../include/gwbasic.h"
 
 #define INITIAL_CAPACITY 16
@@ -27,6 +28,9 @@ void symbol_table_free(SymbolTable *table) {
         if (table->vars[i].type == VAR_STRING && table->vars[i].value.string_val) {
             free(table->vars[i].value.string_val);
         }
+        if (table->vars[i].is_array && table->vars[i].array_data) {
+            free(table->vars[i].array_data);
+        }
     }
     
     free(table->vars);
@@ -51,7 +55,7 @@ void symbol_table_set(SymbolTable *table, const char *name, VarType type, void *
     Variable *var = symbol_table_get(table, name);
     
     if (!var) {
-        // Need to add new variable
+        /* Need to add new variable */
         if (table->count >= table->capacity) {
             size_t new_capacity = table->capacity * 2;
             Variable *new_vars = realloc(table->vars, new_capacity * sizeof(Variable));
@@ -64,9 +68,12 @@ void symbol_table_set(SymbolTable *table, const char *name, VarType type, void *
         strncpy(var->name, name, sizeof(var->name) - 1);
         var->name[sizeof(var->name) - 1] = '\0';
         var->type = type;
+        var->is_array = false;
+        var->array_data = NULL;
+        var->dim_count = 0;
     }
     
-    // Free old string value if the variable was previously a string
+    /* Free old string value if the variable was previously a string */
     VarType old_type = var->type;
     if (old_type == VAR_STRING && var->value.string_val) {
         free(var->value.string_val);
@@ -94,3 +101,38 @@ void symbol_table_set(SymbolTable *table, const char *name, VarType type, void *
             break;
     }
 }
+
+void symbol_table_set_array(SymbolTable *table, const char *name, int *dims, int dim_count) {
+    if (!table || !name || !dims || dim_count <= 0) return;
+    
+    Variable *var = symbol_table_get(table, name);
+    
+    if (!var) {
+        if (table->count >= table->capacity) {
+            size_t new_capacity = table->capacity * 2;
+            Variable *new_vars = realloc(table->vars, new_capacity * sizeof(Variable));
+            if (!new_vars) return;
+            table->vars = new_vars;
+            table->capacity = new_capacity;
+        }
+        
+        var = &table->vars[table->count++];
+        strncpy(var->name, name, sizeof(var->name) - 1);
+        var->name[sizeof(var->name) - 1] = '\0';
+    }
+    
+    /* Calculate total size */
+    size_t total_size = 1;
+    for (int i = 0; i < dim_count && i < 8; i++) {
+        var->dims[i] = dims[i];
+        total_size *= dims[i];
+    }
+    var->dim_count = dim_count;
+    var->is_array = true;
+    
+    /* Allocate array storage (default to doubles) */
+    if (var->array_data) free(var->array_data);
+    var->array_data = calloc(total_size, sizeof(double));
+    var->type = VAR_DOUBLE;
+}
+

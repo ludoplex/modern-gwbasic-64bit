@@ -1,0 +1,12 @@
+10 REM Test GOTO and GOSUB
+20 PRINT "Start"
+30 GOSUB 100
+40 PRINT "After first GOSUB"
+50 GOSUB 100
+60 PRINT "After second GOSUB"
+70 GOTO 200
+100 REM Subroutine
+110 PRINT "In subroutine"
+120 RETURN
+200 PRINT "End"
+210 END

@@ -3,7 +3,13 @@
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
+#include <time.h>
+#include <stdbool.h>
 #include "../include/gwbasic.h"
+
+/* Forward declarations */
+static int execute_line_internal(Program *prog, char *text);
+static int execute_goto(Program *prog, char *args);
 
 Program *program_new(void) {
     Program *prog = malloc(sizeof(Program));
@@ -12,12 +18,16 @@ Program *program_new(void) {
     prog->first_line = NULL;
     prog->current_line = NULL;
     prog->symbols = symbol_table_new();
+    prog->for_stack = NULL;
+    prog->gosub_stack = NULL;
+    prog->running = false;
     
     if (!prog->symbols) {
         free(prog);
         return NULL;
     }
     
+    srand((unsigned)time(NULL)); /* Initialize RND */
     return prog;
 }
 
@@ -30,6 +40,20 @@ void program_free(Program *prog) {
         free(line->text);
         free(line);
         line = next;
+    }
+    
+    /* Free FOR stack */
+    while (prog->for_stack) {
+        ForLoop *next = prog->for_stack->next;
+        free(prog->for_stack);
+        prog->for_stack = next;
+    }
+    
+    /* Free GOSUB stack */
+    while (prog->gosub_stack) {
+        GosubStack *next = prog->gosub_stack->next;
+        free(prog->gosub_stack);
+        prog->gosub_stack = next;
     }
     
     symbol_table_free(prog->symbols);
@@ -65,7 +89,7 @@ void program_add_line(Program *prog, int line_num, const char *text) {
     }
     
     if (curr && curr->line_num == line_num) {
-        // Replace existing line
+        /* Replace existing line */
         char *new_text = strdup(text);
         if (new_text) {
             free(curr->text);
@@ -74,10 +98,20 @@ void program_add_line(Program *prog, int line_num, const char *text) {
         free(new_line->text);
         free(new_line);
     } else {
-        // Insert new line
+        /* Insert new line */
         new_line->next = curr;
         prev->next = new_line;
     }
+}
+
+BasicLine *program_find_line(Program *prog, int line_num) {
+    BasicLine *line = prog->first_line;
+    while (line) {
+        if (line->line_num == line_num) return line;
+        if (line->line_num > line_num) return NULL;
+        line = line->next;
+    }
+    return NULL;
 }
 
 static char *skip_whitespace(char *str) {
@@ -90,67 +124,50 @@ int safe_parse_int(const char *str, int64_t *result) {
     errno = 0;
     *result = strtoll(str, &endptr, 10);
     
-    // Check for conversion errors
-    // Note: This function parses leading digits only, which is correct for
-    // BASIC line numbers (e.g., "10 PRINT" should parse line number 10)
     if (errno == ERANGE || endptr == str) {
-        return 0; // Parse error
+        return 0;
     }
-    return 1; // Success
+    return 1;
 }
 
+/* Execute PRINT statement */
 static int execute_print(Program *prog, char *args) {
     char *ptr = skip_whitespace(args);
     
-    if (*ptr == '"') {
-        ptr++;
-        char *end = strchr(ptr, '"');
-        if (end) {
-            *end = '\0';
-            printf("%s", ptr);
-        }
-    } else if (isdigit(*ptr) || *ptr == '-') {
-        int64_t val;
-        if (safe_parse_int(ptr, &val)) {
-            printf("%lld", (long long)val);
-        }
-    } else if (isalpha(*ptr)) {
-        char varname[256];
-        int i = 0;
-        while (isalnum(*ptr) && i < 255) {
-            varname[i++] = *ptr++;
-        }
-        varname[i] = '\0';
-        
-        Variable *var = symbol_table_get(prog->symbols, varname);
-        if (var) {
-            switch (var->type) {
-                case VAR_INTEGER:
-                    printf("%lld", (long long)var->value.int_val);
-                    break;
-                case VAR_SINGLE:
-                    printf("%f", var->value.float_val);
-                    break;
-                case VAR_DOUBLE:
-                    printf("%lf", var->value.double_val);
-                    break;
-                case VAR_STRING:
-                    printf("%s", var->value.string_val ? var->value.string_val : "");
-                    break;
-            }
-        }
+    if (*ptr == '\0') {
+        printf("\n");
+        return 0;
     }
     
+    /* Evaluate expression and print */
+    Value *val = eval_expression(prog, ptr);
+    if (val) {
+        switch (val->type) {
+            case VAR_INTEGER:
+                printf("%lld", (long long)val->value.int_val);
+                break;
+            case VAR_DOUBLE:
+                printf("%g", val->value.double_val);
+                break;
+            case VAR_STRING:
+                printf("%s", val->value.string_val ? val->value.string_val : "");
+                break;
+            default:
+                break;
+        }
+        value_free(val);
+    }
     printf("\n");
     return 0;
 }
 
+/* Execute LET or assignment */
 static int execute_let(Program *prog, char *args) {
     char *ptr = skip_whitespace(args);
     char varname[256];
     int i = 0;
     
-    while (isalnum(*ptr) && i < 255) {
+    while ((isalnum(*ptr) || *ptr == '$') && i < 255) {
         varname[i++] = *ptr++;
     }
     varname[i] = '\0';
@@ -160,54 +177,339 @@ static int execute_let(Program *prog, char *args) {
         ptr++;
         ptr = skip_whitespace(ptr);
         
-        if (*ptr == '"') {
-            ptr++;
-            char *end = strchr(ptr, '"');
-            if (end) {
-                *end = '\0';
-                symbol_table_set(prog->symbols, varname, VAR_STRING, ptr);
+        Value *val = eval_expression(prog, ptr);
+        if (val) {
+            switch (val->type) {
+                case VAR_INTEGER:
+                    symbol_table_set(prog->symbols, varname, VAR_INTEGER, &val->value.int_val);
+                    break;
+                case VAR_DOUBLE:
+                    symbol_table_set(prog->symbols, varname, VAR_DOUBLE, &val->value.double_val);
+                    break;
+                case VAR_STRING:
+                    symbol_table_set(prog->symbols, varname, VAR_STRING, val->value.string_val);
+                    break;
+                default:
+                    break;
             }
+            value_free(val);
+        }
+    }
+    return 0;
+}
+
+/* Execute GOTO */
+static int execute_goto(Program *prog, char *args) {
+    char *ptr = skip_whitespace(args);
+    int64_t line_num;
+    
+    if (safe_parse_int(ptr, &line_num)) {
+        BasicLine *target = program_find_line(prog, (int)line_num);
+        if (target) {
+            prog->current_line = target;
+            return 0;
+        }
+    }
+    return 0;
+}
+
+/* Execute GOSUB */
+static int execute_gosub(Program *prog, char *args) {
+    char *ptr = skip_whitespace(args);
+    int64_t line_num;
+    
+    if (safe_parse_int(ptr, &line_num)) {
+        BasicLine *target = program_find_line(prog, (int)line_num);
+        if (target) {
+            /* Push return address */
+            GosubStack *entry = malloc(sizeof(GosubStack));
+            if (entry) {
+                entry->return_line = prog->current_line->next;
+                entry->next = prog->gosub_stack;
+                prog->gosub_stack = entry;
+                prog->current_line = target;
+            }
+        }
+    }
+    return 0;
+}
+
+/* Execute RETURN */
+static int execute_return(Program *prog) {
+    if (prog->gosub_stack) {
+        prog->current_line = prog->gosub_stack->return_line;
+        GosubStack *old = prog->gosub_stack;
+        prog->gosub_stack = prog->gosub_stack->next;
+        free(old);
+        return 0;
+    }
+    return 0;
+}
+
+/* Execute FOR */
+static int execute_for(Program *prog, char *args) {
+    char *ptr = skip_whitespace(args);
+    char varname[256];
+    int i = 0;
+    
+    /* Parse variable name */
+    while (isalnum(*ptr) && i < 255) {
+        varname[i++] = *ptr++;
+    }
+    varname[i] = '\0';
+    
+    ptr = skip_whitespace(ptr);
+    if (*ptr != '=') return 0;
+    ptr++;
+    
+    /* Parse start value */
+    Value *start_val = eval_expression(prog, ptr);
+    if (!start_val) return 0;
+    int64_t start = value_to_int(start_val);
+    value_free(start_val);
+    
+    /* Find TO */
+    ptr = strstr(ptr, "TO");
+    if (!ptr) return 0;
+    ptr += 2;
+    
+    /* Parse end value */
+    Value *end_val = eval_expression(prog, ptr);
+    if (!end_val) return 0;
+    int64_t end = value_to_int(end_val);
+    value_free(end_val);
+    
+    /* Parse STEP (optional) */
+    int64_t step = 1;
+    char *step_ptr = strstr(ptr, "STEP");
+    if (step_ptr) {
+        step_ptr += 4;
+        Value *step_val = eval_expression(prog, step_ptr);
+        if (step_val) {
+            step = value_to_int(step_val);
+            value_free(step_val);
+        }
+    }
+    
+    /* Set loop variable */
+    symbol_table_set(prog->symbols, varname, VAR_INTEGER, &start);
+    
+    /* Push FOR loop info */
+    ForLoop *loop = malloc(sizeof(ForLoop));
+    if (loop) {
+        strncpy(loop->var_name, varname, sizeof(loop->var_name) - 1);
+        loop->var_name[sizeof(loop->var_name) - 1] = '\0';
+        loop->end_val = end;
+        loop->step = step;
+        loop->loop_start = prog->current_line;
+        loop->next = prog->for_stack;
+        prog->for_stack = loop;
+    }
+    
+    return 0;
+}
+
+/* Execute NEXT */
+static int execute_next(Program *prog, char *args) {
+    (void)args; /* May be used for specific variable in NEXT X */
+    if (!prog->for_stack) return 0;
+    
+    ForLoop *loop = prog->for_stack;
+    
+    /* Get current value */
+    Variable *var = symbol_table_get(prog->symbols, loop->var_name);
+    if (!var) return 0;
+    
+    /* Increment */
+    int64_t new_val = var->value.int_val + loop->step;
+    
+    /* Check if loop should continue */
+    bool cont = (loop->step > 0) ? (new_val <= loop->end_val) : (new_val >= loop->end_val);
+    
+    if (cont) {
+        symbol_table_set(prog->symbols, loop->var_name, VAR_INTEGER, &new_val);
+        prog->current_line = loop->loop_start;
+    } else {
+        /* Pop loop */
+        prog->for_stack = loop->next;
+        free(loop);
+    }
+    
+    return 0;
+}
+
+/* Execute IF-THEN */
+static int execute_if(Program *prog, char *args) {
+    char *ptr = skip_whitespace(args);
+    
+    /* Find THEN */
+    char *then_ptr = strstr(ptr, "THEN");
+    if (!then_ptr) return 0;
+    
+    /* Extract condition */
+    int cond_len = then_ptr - ptr;
+    char *condition = malloc(cond_len + 1);
+    if (!condition) return 0;
+    memcpy(condition, ptr, cond_len);
+    condition[cond_len] = '\0';
+    
+    /* Evaluate condition - look for comparison operators */
+    char *eq = strstr(condition, "=");
+    char *ne = strstr(condition, "<>");
+    char *lt = strstr(condition, "<");
+    char *gt = strstr(condition, ">");
+    char *le = strstr(condition, "<=");
+    char *ge = strstr(condition, ">=");
+    
+    bool result = false;
+    
+    if (ne) {
+        *ne = '\0';
+        Value *left = eval_expression(prog, condition);
+        Value *right = eval_expression(prog, ne + 2);
+        if (left && right) {
+            if (left->type == VAR_STRING && right->type == VAR_STRING) {
+                result = strcmp(left->value.string_val ? left->value.string_val : "",
+                               right->value.string_val ? right->value.string_val : "") != 0;
+            } else {
+                result = value_to_double(left) != value_to_double(right);
+            }
+        }
+        value_free(left);
+        value_free(right);
+    } else if (le) {
+        *le = '\0';
+        Value *left = eval_expression(prog, condition);
+        Value *right = eval_expression(prog, le + 2);
+        if (left && right) {
+            result = value_to_double(left) <= value_to_double(right);
+        }
+        value_free(left);
+        value_free(right);
+    } else if (ge) {
+        *ge = '\0';
+        Value *left = eval_expression(prog, condition);
+        Value *right = eval_expression(prog, ge + 2);
+        if (left && right) {
+            result = value_to_double(left) >= value_to_double(right);
+        }
+        value_free(left);
+        value_free(right);
+    } else if (eq) {
+        *eq = '\0';
+        Value *left = eval_expression(prog, condition);
+        Value *right = eval_expression(prog, eq + 1);
+        if (left && right) {
+            if (left->type == VAR_STRING && right->type == VAR_STRING) {
+                result = strcmp(left->value.string_val ? left->value.string_val : "",
+                               right->value.string_val ? right->value.string_val : "") == 0;
+            } else {
+                result = value_to_double(left) == value_to_double(right);
+            }
+        }
+        value_free(left);
+        value_free(right);
+    } else if (lt) {
+        *lt = '\0';
+        Value *left = eval_expression(prog, condition);
+        Value *right = eval_expression(prog, lt + 1);
+        if (left && right) {
+            result = value_to_double(left) < value_to_double(right);
+        }
+        value_free(left);
+        value_free(right);
+    } else if (gt) {
+        *gt = '\0';
+        Value *left = eval_expression(prog, condition);
+        Value *right = eval_expression(prog, gt + 1);
+        if (left && right) {
+            result = value_to_double(left) > value_to_double(right);
+        }
+        value_free(left);
+        value_free(right);
+    } else {
+        /* Simple expression */
+        Value *val = eval_expression(prog, condition);
+        if (val) {
+            result = value_to_double(val) != 0.0;
+            value_free(val);
+        }
+    }
+    
+    free(condition);
+    
+    /* Execute THEN clause if true */
+    if (result) {
+        then_ptr += 4;
+        then_ptr = skip_whitespace(then_ptr);
+        
+        /* Check if it's a line number (GOTO) */
+        if (isdigit(*then_ptr)) {
+            return execute_goto(prog, then_ptr);
         } else {
-            int64_t val;
-            if (safe_parse_int(ptr, &val)) {
-                symbol_table_set(prog->symbols, varname, VAR_INTEGER, &val);
-            }
+            /* Execute statement directly */
+            return execute_line_internal(prog, then_ptr);
         }
     }
     
     return 0;
 }
 
-static int execute_line(Program *prog, BasicLine *line) {
-    char *text = line->text;
+/* Internal function to execute a statement within a line */
+static int execute_line_internal(Program *prog, char *text);
+
+static int execute_line_internal(Program *prog, char *text) {
     char *ptr = skip_whitespace(text);
     
     if (strncmp(ptr, "PRINT", 5) == 0) {
         return execute_print(prog, ptr + 5);
     } else if (strncmp(ptr, "LET", 3) == 0) {
         return execute_let(prog, ptr + 3);
-    } else if (isalpha(*ptr)) {
-        // Implicit LET
-        return execute_let(prog, ptr);
+    } else if (strncmp(ptr, "GOTO", 4) == 0) {
+        return execute_goto(prog, ptr + 4);
+    } else if (strncmp(ptr, "GOSUB", 5) == 0) {
+        return execute_gosub(prog, ptr + 5);
+    } else if (strncmp(ptr, "RETURN", 6) == 0) {
+        return execute_return(prog);
+    } else if (strncmp(ptr, "FOR", 3) == 0) {
+        return execute_for(prog, ptr + 3);
+    } else if (strncmp(ptr, "NEXT", 4) == 0) {
+        return execute_next(prog, ptr + 4);
+    } else if (strncmp(ptr, "IF", 2) == 0) {
+        return execute_if(prog, ptr + 2);
     } else if (strncmp(ptr, "END", 3) == 0) {
-        return 1; // Signal end
+        return 1;
+    } else if (strncmp(ptr, "REM", 3) == 0) {
+        return 0;
+    } else if (isalpha(*ptr)) {
+        /* Implicit LET */
+        return execute_let(prog, ptr);
     }
     
     return 0;
+}
+
+static int execute_line(Program *prog, BasicLine *line) {
+    return execute_line_internal(prog, line->text);
 }
 
 int program_run(Program *prog) {
     if (!prog || !prog->first_line) return -1;
     
     prog->current_line = prog->first_line;
+    prog->running = true;
     
-    while (prog->current_line) {
-        int result = execute_line(prog, prog->current_line);
+    while (prog->current_line && prog->running) {
+        BasicLine *current = prog->current_line;
+        prog->current_line = current->next;
+        
+        int result = execute_line(prog, current);
         if (result != 0) {
+            prog->running = false;
             return result > 0 ? 0 : result;
         }
-        prog->current_line = prog->current_line->next;
     }
     
+    prog->running = false;
     return 0;
 }
