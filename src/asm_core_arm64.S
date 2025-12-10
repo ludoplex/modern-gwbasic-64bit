@@ -35,9 +35,14 @@ asm_mul_int:
 /* 64-bit integer division
  * Parameters: x0 = a, x1 = b
  * Returns: x0 = a / b
+ * Note: Division by zero returns 0
  */
 asm_div_int:
+    cbz     x1, .div_by_zero // Check if divisor is zero
     sdiv    x0, x0, x1      // Signed divide x0 by x1
+    ret
+.div_by_zero:
+    mov     x0, #0          // Return 0 on division by zero
     ret
 
 /* Double-precision floating point addition
@@ -67,6 +72,7 @@ asm_mul_double:
 /* Double-precision floating point division
  * Parameters: d0 = a, d1 = b
  * Returns: d0 = a / b
+ * Note: Division by zero returns +/-Infinity (IEEE 754 compliant)
  */
 asm_div_double:
     fdiv    d0, d0, d1      // Divide d0 by d1

@@ -86,6 +86,10 @@ void symbol_table_set(SymbolTable *table, const char *name, VarType type, void *
             break;
         case VAR_STRING:
             var->value.string_val = strdup((char *)value);
+            if (!var->value.string_val) {
+                fprintf(stderr, "Warning: Failed to allocate string memory\n");
+                var->value.string_val = NULL;
+            }
             break;
     }
 }

@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <errno.h>
 #include "../include/gwbasic.h"
 
 Program *program_new(void) {
@@ -43,6 +44,10 @@ void program_add_line(Program *prog, int line_num, const char *text) {
     
     new_line->line_num = line_num;
     new_line->text = strdup(text);
+    if (!new_line->text) {
+        free(new_line);
+        return;
+    }
     new_line->next = NULL;
     
     if (!prog->first_line || prog->first_line->line_num > line_num) {
@@ -61,8 +66,11 @@ void program_add_line(Program *prog, int line_num, const char *text) {
     
     if (curr && curr->line_num == line_num) {
         // Replace existing line
-        free(curr->text);
-        curr->text = strdup(text);
+        char *new_text = strdup(text);
+        if (new_text) {
+            free(curr->text);
+            curr->text = new_text;
+        }
         free(new_line->text);
         free(new_line);
     } else {
@@ -77,6 +85,17 @@ static char *skip_whitespace(char *str) {
     return str;
 }
 
+static int safe_parse_int(const char *str, int64_t *result) {
+    char *endptr;
+    errno = 0;
+    *result = strtoll(str, &endptr, 10);
+    
+    if (errno == ERANGE || endptr == str) {
+        return 0; // Parse error
+    }
+    return 1; // Success
+}
+
 static int execute_print(Program *prog, char *args) {
     char *ptr = skip_whitespace(args);
     
@@ -88,8 +107,10 @@ static int execute_print(Program *prog, char *args) {
             printf("%s", ptr);
         }
     } else if (isdigit(*ptr) || *ptr == '-') {
-        int64_t val = strtoll(ptr, NULL, 10);
-        printf("%lld", (long long)val);
+        int64_t val;
+        if (safe_parse_int(ptr, &val)) {
+            printf("%lld", (long long)val);
+        }
     } else if (isalpha(*ptr)) {
         char varname[256];
         int i = 0;
@@ -144,8 +165,10 @@ static int execute_let(Program *prog, char *args) {
                 symbol_table_set(prog->symbols, varname, VAR_STRING, ptr);
             }
         } else {
-            int64_t val = strtoll(ptr, NULL, 10);
-            symbol_table_set(prog->symbols, varname, VAR_INTEGER, &val);
+            int64_t val;
+            if (safe_parse_int(ptr, &val)) {
+                symbol_table_set(prog->symbols, varname, VAR_INTEGER, &val);
+            }
         }
     }
     

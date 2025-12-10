@@ -38,11 +38,17 @@ asm_mul_int:
 /* 64-bit integer division
  * Parameters: rdi = a, rsi = b
  * Returns: rax = a / b
+ * Note: Division by zero returns 0
  */
 asm_div_int:
+    testq   %rsi, %rsi      # Test if divisor is zero
+    jz      .div_by_zero    # Jump if zero
     movq    %rdi, %rax      # Move dividend to rax
     cqo                     # Sign extend rax to rdx:rax
     idivq   %rsi            # Divide by second parameter (quotient in rax)
+    ret
+.div_by_zero:
+    xorq    %rax, %rax      # Return 0 on division by zero
     ret
 
 /* Double-precision floating point addition
@@ -72,6 +78,7 @@ asm_mul_double:
 /* Double-precision floating point division
  * Parameters: xmm0 = a, xmm1 = b
  * Returns: xmm0 = a / b
+ * Note: Division by zero returns +/-Infinity (IEEE 754 compliant)
  */
 asm_div_double:
     divsd   %xmm1, %xmm0    # Divide xmm0 by xmm1
