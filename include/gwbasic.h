@@ -56,6 +56,9 @@ void symbol_table_free(SymbolTable *table);
 Variable *symbol_table_get(SymbolTable *table, const char *name);
 void symbol_table_set(SymbolTable *table, const char *name, VarType type, void *value);
 
+/* Utility functions */
+int safe_parse_int(const char *str, int64_t *result);
+
 /* Assembly-optimized core functions */
 extern int64_t asm_add_int(int64_t a, int64_t b);
 extern int64_t asm_sub_int(int64_t a, int64_t b);

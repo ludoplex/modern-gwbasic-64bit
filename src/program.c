@@ -85,7 +85,7 @@ static char *skip_whitespace(char *str) {
     return str;
 }
 
-static int safe_parse_int(const char *str, int64_t *result) {
+int safe_parse_int(const char *str, int64_t *result) {
     char *endptr;
     errno = 0;
     *result = strtoll(str, &endptr, 10);

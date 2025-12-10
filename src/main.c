@@ -79,15 +79,17 @@ int main(int argc, char *argv[]) {
                 }
                 
                 // Parse line number
-                int line_num = 0;
+                int64_t line_num_64 = 0;
                 char *ptr = line;
                 while (isspace(*ptr)) ptr++;
                 
                 if (isdigit(*ptr)) {
-                    line_num = atoi(ptr);
-                    while (isdigit(*ptr)) ptr++;
-                    while (isspace(*ptr)) ptr++;
-                    program_add_line(prog, line_num, ptr);
+                    if (safe_parse_int(ptr, &line_num_64)) {
+                        int line_num = (int)line_num_64;
+                        while (isdigit(*ptr)) ptr++;
+                        while (isspace(*ptr)) ptr++;
+                        program_add_line(prog, line_num, ptr);
+                    }
                 }
             }
             fclose(f);
@@ -147,10 +149,15 @@ int main(int argc, char *argv[]) {
         
         // Check if it's a numbered line
         if (isdigit(*ptr)) {
-            int line_num = atoi(ptr);
-            while (isdigit(*ptr)) ptr++;
-            while (isspace(*ptr)) ptr++;
-            program_add_line(prog, line_num, ptr);
+            int64_t line_num_64 = 0;
+            if (safe_parse_int(ptr, &line_num_64)) {
+                int line_num = (int)line_num_64;
+                while (isdigit(*ptr)) ptr++;
+                while (isspace(*ptr)) ptr++;
+                program_add_line(prog, line_num, ptr);
+            } else {
+                printf("Invalid line number\n");
+            }
         } else {
             // Direct execution (not implemented yet)
             printf("Direct execution not yet supported. Use line numbers.\n");
