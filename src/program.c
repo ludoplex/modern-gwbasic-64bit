@@ -90,6 +90,9 @@ int safe_parse_int(const char *str, int64_t *result) {
     errno = 0;
     *result = strtoll(str, &endptr, 10);
     
+    // Check for conversion errors
+    // Note: This function parses leading digits only, which is correct for
+    // BASIC line numbers (e.g., "10 PRINT" should parse line number 10)
     if (errno == ERANGE || endptr == str) {
         return 0; // Parse error
     }

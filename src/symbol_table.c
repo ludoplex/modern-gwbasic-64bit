@@ -66,8 +66,9 @@ void symbol_table_set(SymbolTable *table, const char *name, VarType type, void *
         var->type = type;
     }
     
-    // Free old string value if replacing
-    if (var->type == VAR_STRING && var->value.string_val) {
+    // Free old string value if the variable was previously a string
+    VarType old_type = var->type;
+    if (old_type == VAR_STRING && var->value.string_val) {
         free(var->value.string_val);
         var->value.string_val = NULL;
     }
