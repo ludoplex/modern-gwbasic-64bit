@@ -57,6 +57,28 @@ char *builtin_mid(const char *s, int start, int len) {
     return result;
 }
 
+/* CHR$ - Convert ASCII code to character */
+char *builtin_chr(int code) {
+    char *result = malloc(2);
+    if (!result) return NULL;
+    result[0] = (char)(code & 0xFF);
+    result[1] = '\0';
+    return result;
+}
+
+/* STR$ - Convert number to string */
+char *builtin_str(double val) {
+    char *result = malloc(32);
+    if (!result) return NULL;
+    snprintf(result, 32, "%g", val);
+    return result;
+}
+
+/* VAL - Convert string to number */
+double builtin_val(const char *s) {
+    return s ? atof(s) : 0.0;
+}
+
 double safe_parse_double(const char *str) {
     char *endptr;
     double result = strtod(str, &endptr);
@@ -241,6 +263,30 @@ static Value *parse_factor(Program *prog, const char **expr) {
                     value_free(arg);
                     return result;
                 }
+            }
+            
+            /* Additional string functions with single parameter */
+            if (strcmp(name, "CHR$") == 0) {
+                result->type = VAR_STRING;
+                int code = (int)value_to_int(arg);
+                result->value.string_val = builtin_chr(code);
+                value_free(arg);
+                return result;
+            } else if (strcmp(name, "STR$") == 0) {
+                result->type = VAR_STRING;
+                double val = value_to_double(arg);
+                result->value.string_val = builtin_str(val);
+                value_free(arg);
+                return result;
+            } else if (strcmp(name, "VAL") == 0) {
+                result->type = VAR_DOUBLE;
+                if (arg->type == VAR_STRING) {
+                    result->value.double_val = builtin_val(arg->value.string_val);
+                } else {
+                    result->value.double_val = value_to_double(arg);
+                }
+                value_free(arg);
+                return result;
             }
             
             /* Math functions */

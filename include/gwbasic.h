@@ -82,6 +82,7 @@ typedef struct {
     ForLoop *for_stack;
     GosubStack *gosub_stack;
     bool running;
+    FILE *files[10]; /* File handles for OPEN statement */
 } Program;
 
 /* Function prototypes */
@@ -115,6 +116,9 @@ int builtin_len(const char *s);
 char *builtin_left(const char *s, int n);
 char *builtin_right(const char *s, int n);
 char *builtin_mid(const char *s, int start, int len);
+char *builtin_chr(int code);
+char *builtin_str(double val);
+double builtin_val(const char *s);
 
 /* Utility functions */
 int safe_parse_int(const char *str, int64_t *result);

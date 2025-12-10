@@ -2,6 +2,10 @@
 *.o
 gwbasic
 
+# Rust build artifacts
+rust_benchmarks/target/
+rust_benchmarks/Cargo.lock
+
 # CodeQL artifacts
 _codeql_detected_source_root
 

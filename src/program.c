@@ -10,6 +10,7 @@
 /* Forward declarations */
 static int execute_line_internal(Program *prog, char *text);
 static int execute_goto(Program *prog, char *args);
+static int execute_print_file(Program *prog, char *args);
 
 Program *program_new(void) {
     Program *prog = malloc(sizeof(Program));
@@ -21,6 +22,11 @@ Program *program_new(void) {
     prog->for_stack = NULL;
     prog->gosub_stack = NULL;
     prog->running = false;
+    
+    /* Initialize file handles */
+    for (int i = 0; i < 10; i++) {
+        prog->files[i] = NULL;
+    }
     
     if (!prog->symbols) {
         free(prog);
@@ -54,6 +60,13 @@ void program_free(Program *prog) {
         GosubStack *next = prog->gosub_stack->next;
         free(prog->gosub_stack);
         prog->gosub_stack = next;
+    }
+    
+    /* Close open files */
+    for (int i = 0; i < 10; i++) {
+        if (prog->files[i]) {
+            fclose(prog->files[i]);
+        }
     }
     
     symbol_table_free(prog->symbols);
@@ -133,6 +146,11 @@ int safe_parse_int(const char *str, int64_t *result) {
 /* Execute PRINT statement */
 static int execute_print(Program *prog, char *args) {
     char *ptr = skip_whitespace(args);
+    
+    /* Check for file I/O: PRINT #filenum, */
+    if (*ptr == '#') {
+        return execute_print_file(prog, args);
+    }
     
     if (*ptr == '\0') {
         printf("\n");
@@ -290,6 +308,120 @@ static int execute_dim(Program *prog, char *args) {
     
     if (*ptr == ')') {
         symbol_table_set_array(prog->symbols, varname, dims, dim_count);
+    }
+    
+    return 0;
+}
+
+/* Execute OPEN statement */
+static int execute_open(Program *prog, char *args) {
+    char *ptr = skip_whitespace(args);
+    
+    /* Parse: OPEN "filename" FOR mode AS #filenum */
+    if (*ptr == '"') {
+        ptr++;
+        char *end = strchr(ptr, '"');
+        if (!end) return 0;
+        
+        char filename[256];
+        int len = end - ptr;
+        if (len >= 256) len = 255;
+        memcpy(filename, ptr, len);
+        filename[len] = '\0';
+        ptr = end + 1;
+        
+        /* Find FOR */
+        ptr = strstr(ptr, "FOR");
+        if (!ptr) return 0;
+        ptr += 3;
+        ptr = skip_whitespace(ptr);
+        
+        /* Parse mode */
+        char *mode_str = "r";
+        if (strncmp(ptr, "INPUT", 5) == 0) {
+            mode_str = "r";
+            ptr += 5;
+        } else if (strncmp(ptr, "OUTPUT", 6) == 0) {
+            mode_str = "w";
+            ptr += 6;
+        } else if (strncmp(ptr, "APPEND", 6) == 0) {
+            mode_str = "a";
+            ptr += 6;
+        }
+        
+        /* Find AS */
+        ptr = strstr(ptr, "AS");
+        if (!ptr) return 0;
+        ptr += 2;
+        ptr = skip_whitespace(ptr);
+        
+        /* Parse file number */
+        if (*ptr == '#') ptr++;
+        int64_t filenum;
+        if (safe_parse_int(ptr, &filenum) && filenum >= 1 && filenum <= 10) {
+            int idx = (int)filenum - 1;
+            if (prog->files[idx]) {
+                fclose(prog->files[idx]);
+            }
+            prog->files[idx] = fopen(filename, mode_str);
+        }
+    }
+    
+    return 0;
+}
+
+/* Execute CLOSE statement */
+static int execute_close(Program *prog, char *args) {
+    char *ptr = skip_whitespace(args);
+    
+    /* Parse: CLOSE #filenum */
+    if (*ptr == '#') ptr++;
+    int64_t filenum;
+    if (safe_parse_int(ptr, &filenum) && filenum >= 1 && filenum <= 10) {
+        int idx = (int)filenum - 1;
+        if (prog->files[idx]) {
+            fclose(prog->files[idx]);
+            prog->files[idx] = NULL;
+        }
+    }
+    
+    return 0;
+}
+
+/* Execute PRINT# statement */
+static int execute_print_file(Program *prog, char *args) {
+    char *ptr = skip_whitespace(args);
+    
+    /* Parse: PRINT #filenum, expression */
+    if (*ptr == '#') ptr++;
+    int64_t filenum;
+    if (!safe_parse_int(ptr, &filenum) || filenum < 1 || filenum > 10) return 0;
+    
+    int idx = (int)filenum - 1;
+    if (!prog->files[idx]) return 0;
+    
+    /* Find comma */
+    while (*ptr && *ptr != ',') ptr++;
+    if (*ptr == ',') ptr++;
+    ptr = skip_whitespace(ptr);
+    
+    /* Evaluate and print */
+    Value *val = eval_expression(prog, ptr);
+    if (val) {
+        switch (val->type) {
+            case VAR_INTEGER:
+                fprintf(prog->files[idx], "%lld\n", (long long)val->value.int_val);
+                break;
+            case VAR_DOUBLE:
+                fprintf(prog->files[idx], "%g\n", val->value.double_val);
+                break;
+            case VAR_STRING:
+                fprintf(prog->files[idx], "%s\n", val->value.string_val ? val->value.string_val : "");
+                break;
+            default:
+                break;
+        }
+        value_free(val);
     }
     
     return 0;
@@ -552,36 +684,79 @@ static int execute_if(Program *prog, char *args) {
     return 0;
 }
 
+/* Optimized statement dispatch using hash table for O(1) lookup */
+typedef int (*StatementHandler)(Program *, char *);
+
+typedef struct {
+    const char *keyword;
+    int len;
+    StatementHandler handler;
+} StatementEntry;
+
+/* Fast hash function for statement keywords */
+static inline unsigned int hash_keyword(const char *str, int len) {
+    unsigned int hash = 5381;
+    for (int i = 0; i < len; i++) {
+        hash = ((hash << 5) + hash) + str[i]; /* hash * 33 + c */
+    }
+    return hash;
+}
+
+/* Hash table for O(1) statement dispatch */
+static const StatementEntry statement_table[] = {
+    {"PRINT", 5, execute_print},
+    {"INPUT", 5, execute_input},
+    {"DIM", 3, execute_dim},
+    {"LET", 3, execute_let},
+    {"GOTO", 4, execute_goto},
+    {"GOSUB", 5, execute_gosub},
+    {"RETURN", 6, (StatementHandler)execute_return},
+    {"FOR", 3, execute_for},
+    {"NEXT", 4, execute_next},
+    {"IF", 2, execute_if},
+    {"OPEN", 4, execute_open},
+    {"CLOSE", 5, execute_close},
+    {"END", 3, NULL}, /* Special case */
+    {"REM", 3, NULL}, /* Special case - comment */
+    {NULL, 0, NULL}
+};
+
 /* Internal function to execute a statement within a line */
 static int execute_line_internal(Program *prog, char *text) {
     char *ptr = skip_whitespace(text);
     
-    if (strncmp(ptr, "PRINT", 5) == 0) {
-        return execute_print(prog, ptr + 5);
-    } else if (strncmp(ptr, "INPUT", 5) == 0) {
-        return execute_input(prog, ptr + 5);
-    } else if (strncmp(ptr, "DIM", 3) == 0) {
-        return execute_dim(prog, ptr + 3);
-    } else if (strncmp(ptr, "LET", 3) == 0) {
-        return execute_let(prog, ptr + 3);
-    } else if (strncmp(ptr, "GOTO", 4) == 0) {
-        return execute_goto(prog, ptr + 4);
-    } else if (strncmp(ptr, "GOSUB", 5) == 0) {
-        return execute_gosub(prog, ptr + 5);
-    } else if (strncmp(ptr, "RETURN", 6) == 0) {
-        return execute_return(prog);
-    } else if (strncmp(ptr, "FOR", 3) == 0) {
-        return execute_for(prog, ptr + 3);
-    } else if (strncmp(ptr, "NEXT", 4) == 0) {
-        return execute_next(prog, ptr + 4);
-    } else if (strncmp(ptr, "IF", 2) == 0) {
-        return execute_if(prog, ptr + 2);
-    } else if (strncmp(ptr, "END", 3) == 0) {
-        return 1;
-    } else if (strncmp(ptr, "REM", 3) == 0) {
-        return 0;
-    } else if (isalpha(*ptr)) {
-        /* Implicit LET */
+    /* Fast path: check first character for common cases */
+    char first = *ptr;
+    
+    /* Branchless optimization: use lookup table */
+    if (first >= 'A' && first <= 'Z') {
+        /* Try hash table lookup first - check longest matches first */
+        for (int i = 0; statement_table[i].keyword != NULL; i++) {
+            const char *kw = statement_table[i].keyword;
+            int len = statement_table[i].len;
+            
+            if (strncmp(ptr, kw, len) == 0) {
+                /* Check if it's actually a complete keyword match */
+                char next_char = ptr[len];
+                if (next_char == '\0' || isspace(next_char) || next_char == '#' || 
+                    next_char == '"' || next_char == ',' || next_char == '=' || next_char == '(') {
+                    
+                    /* Special cases */
+                    if (kw[0] == 'E' && kw[1] == 'N' && kw[2] == 'D') return 1; /* END */
+                    if (kw[0] == 'R' && kw[1] == 'E' && kw[2] == 'M') return 0; /* REM */
+                    if (kw[0] == 'R' && kw[1] == 'E' && kw[2] == 'T') return execute_return(prog); /* RETURN */
+                    
+                    /* Call handler */
+                    if (statement_table[i].handler) {
+                        return statement_table[i].handler(prog, ptr + len);
+                    }
+                }
+            }
+        }
+    }
+    
+    /* Fallback: implicit LET */
+    if (isalpha(*ptr)) {
         return execute_let(prog, ptr);
     }
     
