@@ -77,7 +77,7 @@ double value_to_double(Value *val) {
     switch (val->type) {
         case VAR_INTEGER: return (double)val->value.int_val;
         case VAR_DOUBLE: return val->value.double_val;
-        case VAR_SINGLE: return (double)val->value.int_val; /* fallback */
+        case VAR_SINGLE: return val->value.double_val; /* Use double_val for singles too */
         case VAR_STRING: return val->value.string_val ? atof(val->value.string_val) : 0.0;
     }
     return 0.0;
@@ -88,7 +88,7 @@ int64_t value_to_int(Value *val) {
     switch (val->type) {
         case VAR_INTEGER: return val->value.int_val;
         case VAR_DOUBLE: return (int64_t)val->value.double_val;
-        case VAR_SINGLE: return val->value.int_val; /* fallback */
+        case VAR_SINGLE: return (int64_t)val->value.double_val; /* Use double_val */
         case VAR_STRING: return val->value.string_val ? atoll(val->value.string_val) : 0;
     }
     return 0;

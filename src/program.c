@@ -553,8 +553,6 @@ static int execute_if(Program *prog, char *args) {
 }
 
 /* Internal function to execute a statement within a line */
-static int execute_line_internal(Program *prog, char *text);
-
 static int execute_line_internal(Program *prog, char *text) {
     char *ptr = skip_whitespace(text);
     
