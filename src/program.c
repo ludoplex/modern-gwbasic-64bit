@@ -198,6 +198,103 @@ static int execute_let(Program *prog, char *args) {
     return 0;
 }
 
+/* Execute INPUT statement */
+static int execute_input(Program *prog, char *args) {
+    char *ptr = skip_whitespace(args);
+    char varname[256];
+    int i = 0;
+    
+    /* Optional prompt */
+    if (*ptr == '"') {
+        ptr++;
+        char *end = strchr(ptr, '"');
+        if (end) {
+            *end = '\0';
+            printf("%s? ", ptr);
+            ptr = end + 1;
+            if (*ptr == ';' || *ptr == ',') ptr++;
+        }
+    }
+    
+    ptr = skip_whitespace(ptr);
+    
+    /* Get variable name */
+    while ((isalnum(*ptr) || *ptr == '$') && i < 255) {
+        varname[i++] = *ptr++;
+    }
+    varname[i] = '\0';
+    
+    /* Read input */
+    char input[1024];
+    if (fgets(input, sizeof(input), stdin)) {
+        /* Remove newline */
+        size_t len = strlen(input);
+        if (len > 0 && input[len-1] == '\n') {
+            input[len-1] = '\0';
+        }
+        
+        /* Check if string variable (ends with $) */
+        if (varname[strlen(varname)-1] == '$') {
+            symbol_table_set(prog->symbols, varname, VAR_STRING, input);
+        } else {
+            /* Try to parse as number */
+            int64_t ival;
+            if (safe_parse_int(input, &ival)) {
+                symbol_table_set(prog->symbols, varname, VAR_INTEGER, &ival);
+            } else {
+                double dval = safe_parse_double(input);
+                symbol_table_set(prog->symbols, varname, VAR_DOUBLE, &dval);
+            }
+        }
+    }
+    
+    return 0;
+}
+
+/* Execute DIM statement */
+static int execute_dim(Program *prog, char *args) {
+    char *ptr = skip_whitespace(args);
+    char varname[256];
+    int i = 0;
+    
+    /* Get variable name */
+    while (isalnum(*ptr) && i < 255) {
+        varname[i++] = *ptr++;
+    }
+    varname[i] = '\0';
+    
+    ptr = skip_whitespace(ptr);
+    if (*ptr != '(') return 0;
+    ptr++;
+    
+    /* Parse dimensions */
+    int dims[8];
+    int dim_count = 0;
+    
+    while (dim_count < 8) {
+        ptr = skip_whitespace(ptr);
+        Value *dim_val = eval_expression(prog, ptr);
+        if (dim_val) {
+            dims[dim_count++] = (int)value_to_int(dim_val) + 1; /* +1 because BASIC is 0-based with DIM */
+            value_free(dim_val);
+        }
+        
+        /* Find comma or closing paren */
+        while (*ptr && *ptr != ',' && *ptr != ')') ptr++;
+        if (*ptr == ',') {
+            ptr++;
+        } else {
+            break;
+        }
+    }
+    
+    if (*ptr == ')') {
+        symbol_table_set_array(prog->symbols, varname, dims, dim_count);
+    }
+    
+    return 0;
+}
+
 /* Execute GOTO */
 static int execute_goto(Program *prog, char *args) {
     char *ptr = skip_whitespace(args);
@@ -463,6 +560,10 @@ static int execute_line_internal(Program *prog, char *text) {
     
     if (strncmp(ptr, "PRINT", 5) == 0) {
         return execute_print(prog, ptr + 5);
+    } else if (strncmp(ptr, "INPUT", 5) == 0) {
+        return execute_input(prog, ptr + 5);
+    } else if (strncmp(ptr, "DIM", 3) == 0) {
+        return execute_dim(prog, ptr + 3);
     } else if (strncmp(ptr, "LET", 3) == 0) {
         return execute_let(prog, ptr + 3);
     } else if (strncmp(ptr, "GOTO", 4) == 0) {

@@ -179,6 +179,71 @@ static Value *parse_factor(Program *prog, const char **expr) {
             *expr = s;
             
             /* Built-in functions */
+            
+            /* String functions */
+            if (strcmp(name, "LEN") == 0) {
+                result->type = VAR_INTEGER;
+                if (arg->type == VAR_STRING) {
+                    result->value.int_val = builtin_len(arg->value.string_val);
+                } else {
+                    result->value.int_val = 0;
+                }
+                value_free(arg);
+                return result;
+            } else if (strcmp(name, "LEFT$") == 0 || strcmp(name, "RIGHT$") == 0 || strcmp(name, "MID$") == 0) {
+                /* These need additional parameters - parse them */
+                s = skip_ws(*expr);
+                if (*s == ',') {
+                    s++;
+                    *expr = s;
+                    Value *arg2 = parse_expr(prog, expr);
+                    s = skip_ws(*expr);
+                    
+                    if (strcmp(name, "LEFT$") == 0) {
+                        result->type = VAR_STRING;
+                        if (arg->type == VAR_STRING) {
+                            result->value.string_val = builtin_left(arg->value.string_val, (int)value_to_int(arg2));
+                        } else {
+                            result->value.string_val = strdup("");
+                        }
+                    } else if (strcmp(name, "RIGHT$") == 0) {
+                        result->type = VAR_STRING;
+                        if (arg->type == VAR_STRING) {
+                            result->value.string_val = builtin_right(arg->value.string_val, (int)value_to_int(arg2));
+                        } else {
+                            result->value.string_val = strdup("");
+                        }
+                    } else if (strcmp(name, "MID$") == 0) {
+                        /* MID$ can have 2 or 3 parameters */
+                        int len = -1;
+                        if (*s == ',') {
+                            s++;
+                            *expr = s;
+                            Value *arg3 = parse_expr(prog, expr);
+                            len = (int)value_to_int(arg3);
+                            value_free(arg3);
+                            s = skip_ws(*expr);
+                        }
+                        
+                        result->type = VAR_STRING;
+                        if (arg->type == VAR_STRING) {
+                            int start = (int)value_to_int(arg2);
+                            if (len == -1) len = 999999; /* Large number for rest of string */
+                            result->value.string_val = builtin_mid(arg->value.string_val, start, len);
+                        } else {
+                            result->value.string_val = strdup("");
+                        }
+                    }
+                    
+                    value_free(arg2);
+                    if (*s == ')') s++;
+                    *expr = s;
+                    value_free(arg);
+                    return result;
+                }
+            }
+            
+            /* Math functions */
             double val = value_to_double(arg);
             value_free(arg);
             
@@ -190,6 +255,11 @@ static Value *parse_factor(Program *prog, const char **expr) {
             else if (strcmp(name, "ABS") == 0) result->value.double_val = builtin_abs(val);
             else if (strcmp(name, "INT") == 0) result->value.double_val = builtin_int(val);
             else if (strcmp(name, "RND") == 0) result->value.double_val = builtin_rnd(val);
+            else if (strcmp(name, "ASC") == 0) {
+                /* ASC returns ASCII value of first character */
+                result->type = VAR_INTEGER;
+                result->value.int_val = (int64_t)val;
+            }
             else result->value.double_val = 0.0;
             
             return result;
