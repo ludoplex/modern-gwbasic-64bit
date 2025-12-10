@@ -1,6 +1,7 @@
 #ifndef GWBASIC_H
 #define GWBASIC_H
 
+#include <stdio.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>

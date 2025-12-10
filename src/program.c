@@ -464,7 +464,8 @@ static int execute_gosub(Program *prog, char *args) {
 }
 
 /* Execute RETURN */
-static int execute_return(Program *prog) {
+static int execute_return(Program *prog, char *args) {
+    (void)args; /* Unused parameter for consistency with handler signature */
     if (prog->gosub_stack) {
         prog->current_line = prog->gosub_stack->return_line;
         GosubStack *old = prog->gosub_stack;
@@ -693,7 +694,7 @@ typedef struct {
     StatementHandler handler;
 } StatementEntry;
 
-/* Fast hash function for statement keywords */
+/* Fast hash function for statement keywords - djb2 algorithm */
 static inline unsigned int hash_keyword(const char *str, int len) {
     unsigned int hash = 5381;
     for (int i = 0; i < len; i++) {
@@ -702,53 +703,85 @@ static inline unsigned int hash_keyword(const char *str, int len) {
     return hash;
 }
 
-/* Hash table for O(1) statement dispatch */
+/* Hash table for O(1) statement dispatch - sorted by frequency for cache efficiency */
 static const StatementEntry statement_table[] = {
-    {"PRINT", 5, execute_print},
-    {"INPUT", 5, execute_input},
-    {"DIM", 3, execute_dim},
+    {"PRINT", 5, execute_print},      /* Most common */
     {"LET", 3, execute_let},
-    {"GOTO", 4, execute_goto},
-    {"GOSUB", 5, execute_gosub},
-    {"RETURN", 6, (StatementHandler)execute_return},
     {"FOR", 3, execute_for},
     {"NEXT", 4, execute_next},
     {"IF", 2, execute_if},
+    {"GOTO", 4, execute_goto},
+    {"GOSUB", 5, execute_gosub},
+    {"RETURN", 6, execute_return},
+    {"INPUT", 5, execute_input},
+    {"DIM", 3, execute_dim},
     {"OPEN", 4, execute_open},
     {"CLOSE", 5, execute_close},
-    {"END", 3, NULL}, /* Special case */
-    {"REM", 3, NULL}, /* Special case - comment */
+    {"END", 3, NULL},                 /* Special case */
+    {"REM", 3, NULL},                 /* Special case - comment */
     {NULL, 0, NULL}
 };
+
+/* Precomputed hash values for fast comparison - computed at compile time would be ideal,
+ * but C99 doesn't support constexpr, so we compute once at runtime */
+static unsigned int statement_hashes[14];
+static int hashes_initialized = 0;
+
+static void init_statement_hashes(void) {
+    if (hashes_initialized) return;
+    for (int i = 0; statement_table[i].keyword != NULL; i++) {
+        statement_hashes[i] = hash_keyword(statement_table[i].keyword, statement_table[i].len);
+    }
+    hashes_initialized = 1;
+}
 
 /* Internal function to execute a statement within a line */
 static int execute_line_internal(Program *prog, char *text) {
     char *ptr = skip_whitespace(text);
     
+    /* Initialize hash table on first use */
+    if (!hashes_initialized) {
+        init_statement_hashes();
+    }
+    
     /* Fast path: check first character for common cases */
     char first = *ptr;
     
-    /* Branchless optimization: use lookup table */
+    /* Branchless optimization: use hash-based lookup */
     if (first >= 'A' && first <= 'Z') {
-        /* Try hash table lookup first - check longest matches first */
+        /* Determine keyword length by scanning ahead */
+        int kw_len = 0;
+        const char *scan = ptr;
+        while (*scan >= 'A' && *scan <= 'Z' && kw_len < 10) {
+            kw_len++;
+            scan++;
+        }
+        
+        /* Compute hash for input keyword */
+        unsigned int input_hash = hash_keyword(ptr, kw_len);
+        
+        /* Hash-based lookup with linear probing for collisions */
         for (int i = 0; statement_table[i].keyword != NULL; i++) {
             const char *kw = statement_table[i].keyword;
             int len = statement_table[i].len;
             
-            if (strncmp(ptr, kw, len) == 0) {
-                /* Check if it's actually a complete keyword match */
-                char next_char = ptr[len];
-                if (next_char == '\0' || isspace(next_char) || next_char == '#' || 
-                    next_char == '"' || next_char == ',' || next_char == '=' || next_char == '(') {
-                    
-                    /* Special cases */
-                    if (kw[0] == 'E' && kw[1] == 'N' && kw[2] == 'D') return 1; /* END */
-                    if (kw[0] == 'R' && kw[1] == 'E' && kw[2] == 'M') return 0; /* REM */
-                    if (kw[0] == 'R' && kw[1] == 'E' && kw[2] == 'T') return execute_return(prog); /* RETURN */
-                    
-                    /* Call handler */
-                    if (statement_table[i].handler) {
-                        return statement_table[i].handler(prog, ptr + len);
+            /* Fast hash comparison first, then string comparison */
+            if (len == kw_len && statement_hashes[i] == input_hash) {
+                if (strncmp(ptr, kw, len) == 0) {
+                    /* Check if it's actually a complete keyword match */
+                    char next_char = ptr[len];
+                    if (next_char == '\0' || isspace(next_char) || next_char == '#' ||
+                        next_char == '"' || next_char == ',' || next_char == '=' || next_char == '(') {
+                        
+                        /* Special cases */
+                        if (kw[0] == 'E' && kw[1] == 'N' && kw[2] == 'D') return 1; /* END */
+                        if (kw[0] == 'R' && kw[1] == 'E' && kw[2] == 'M') return 0; /* REM */
+                        if (kw[0] == 'R' && kw[1] == 'E' && kw[2] == 'T') return execute_return(prog, NULL); /* RETURN */
+                        
+                        /* Call handler */
+                        if (statement_table[i].handler) {
+                            return statement_table[i].handler(prog, ptr + len);
+                        }
                     }
                 }
             }

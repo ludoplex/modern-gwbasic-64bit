@@ -51,7 +51,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
-    // Test assembly functions
+    /* Test assembly functions */
     int64_t a = 10, b = 5;
     printf("Testing assembly core:\n");
     printf("  %lld + %lld = %lld\n", (long long)a, (long long)b, (long long)asm_add_int(a, b));
@@ -66,19 +66,19 @@ int main(int argc, char *argv[]) {
     printf("  %.2f / %.2f = %.2f\n", da, db, asm_div_double(da, db));
     printf("\n");
     
-    // If a file was provided, load it
+    /* If a file was provided, load it */
     if (argc > 1) {
         FILE *f = fopen(argv[1], "r");
         if (f) {
             char line[1024];
             while (fgets(line, sizeof(line), f)) {
-                // Remove newline
+                /* Remove newline */
                 size_t len = strlen(line);
                 if (len > 0 && line[len-1] == '\n') {
                     line[len-1] = '\0';
                 }
                 
-                // Parse line number
+                /* Parse line number */
                 int64_t line_num_64 = 0;
                 char *ptr = line;
                 while (isspace(*ptr)) ptr++;
@@ -103,7 +103,7 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    // Interactive mode
+    /* Interactive mode */
     printf("Type HELP for commands\n\n");
     
     char input[1024];
@@ -113,19 +113,19 @@ int main(int argc, char *argv[]) {
             break;
         }
         
-        // Remove newline
+        /* Remove newline */
         size_t len = strlen(input);
         if (len > 0 && input[len-1] == '\n') {
             input[len-1] = '\0';
         }
         
-        // Skip empty lines
+        /* Skip empty lines */
         if (strlen(input) == 0) continue;
         
         char *ptr = input;
         while (isspace(*ptr)) ptr++;
         
-        // Check for commands
+        /* Check for commands */
         if (strncmp(ptr, "QUIT", 4) == 0 || strncmp(ptr, "EXIT", 4) == 0) {
             break;
         } else if (strncmp(ptr, "HELP", 4) == 0) {
@@ -147,7 +147,7 @@ int main(int argc, char *argv[]) {
             continue;
         }
         
-        // Check if it's a numbered line
+        /* Check if it's a numbered line */
         if (isdigit(*ptr)) {
             int64_t line_num_64 = 0;
             if (safe_parse_int(ptr, &line_num_64)) {
@@ -159,7 +159,7 @@ int main(int argc, char *argv[]) {
                 printf("Invalid line number\n");
             }
         } else {
-            // Direct execution (not implemented yet)
+            /* Direct execution (not implemented yet) */
             printf("Direct execution not yet supported. Use line numbers.\n");
         }
     }
