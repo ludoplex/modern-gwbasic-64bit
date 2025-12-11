@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <limits.h>
 #include "../include/gwbasic.h"
 
 #define INITIAL_CAPACITY 16
@@ -80,6 +82,14 @@ void symbol_table_set(SymbolTable *table, const char *name, VarType type, void *
         var->value.string_val = NULL;
     }
     
+    /* Free old array data if the variable was previously an array */
+    if (var->is_array && var->array_data) {
+        free(var->array_data);
+        var->array_data = NULL;
+        var->is_array = false;
+        var->dim_count = 0;
+    }
+    
     var->type = type;
     
     switch (type) {
@@ -121,18 +131,32 @@ void symbol_table_set_array(SymbolTable *table, const char *name, int *dims, int
         var->name[sizeof(var->name) - 1] = '\0';
     }
     
-    /* Calculate total size */
+    /* Calculate total size with overflow check */
     size_t total_size = 1;
     for (int i = 0; i < dim_count && i < 8; i++) {
         var->dims[i] = dims[i];
+        /* Check for overflow before multiplication */
+        if (total_size > SIZE_MAX / dims[i]) {
+            fprintf(stderr, "Error: Array dimensions too large\n");
+            return;
+        }
         total_size *= dims[i];
     }
     var->dim_count = dim_count;
-    var->is_array = true;
     
     /* Allocate array storage (default to doubles) */
     if (var->array_data) free(var->array_data);
     var->array_data = calloc(total_size, sizeof(double));
+    
+    /* Check allocation success */
+    if (!var->array_data) {
+        fprintf(stderr, "Error: Failed to allocate array memory\n");
+        var->is_array = false;
+        var->dim_count = 0;
+        return;
+    }
+    
+    var->is_array = true;
     var->type = VAR_DOUBLE;
 }
 

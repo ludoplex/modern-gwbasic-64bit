@@ -251,8 +251,9 @@ static int execute_input(Program *prog, char *args) {
             input[len-1] = '\0';
         }
         
-        /* Check if string variable (ends with $) */
-        if (varname[strlen(varname)-1] == '$') {
+        /* Check if string variable (ends with $) - check length first */
+        size_t varname_len = strlen(varname);
+        if (varname_len > 0 && varname[varname_len-1] == '$') {
             symbol_table_set(prog->symbols, varname, VAR_STRING, input);
         } else {
             /* Try to parse as number */
@@ -363,7 +364,13 @@ static int execute_open(Program *prog, char *args) {
             if (prog->files[idx]) {
                 fclose(prog->files[idx]);
             }
-            prog->files[idx] = fopen(filename, mode_str);
+            
+            /* Check if file was opened successfully */
+            if (!prog->files[idx]) {
+                fprintf(stderr, "Error: Could not open file '%s' for %s\n", filename, 
+                       strcmp(mode_str, "r") == 0 ? "INPUT" : 
+                       strcmp(mode_str, "w") == 0 ? "OUTPUT" : "APPEND");
+            }
         }
     }
     
@@ -450,6 +457,12 @@ static int execute_gosub(Program *prog, char *args) {
     if (safe_parse_int(ptr, &line_num)) {
         BasicLine *target = program_find_line(prog, (int)line_num);
         if (target) {
+            /* Check if current_line is valid */
+            if (!prog->current_line) {
+                fprintf(stderr, "Error: GOSUB called with no current line\n");
+                return 0;
+            }
+            
             /* Push return address */
             GosubStack *entry = malloc(sizeof(GosubStack));
             if (entry) {
@@ -521,8 +534,20 @@ static int execute_for(Program *prog, char *args) {
         }
     }
     
+    /* Validate STEP is not zero */
+    if (step == 0) {
+        fprintf(stderr, "Error: FOR loop STEP cannot be zero\n");
+        return 0;
+    }
+    
     /* Set loop variable */
     symbol_table_set(prog->symbols, varname, VAR_INTEGER, &start);
+    
+    /* Check if current_line is valid */
+    if (!prog->current_line) {
+        fprintf(stderr, "Error: FOR loop with no current line\n");
+        return 0;
+    }
     
     /* Push FOR loop info */
     ForLoop *loop = malloc(sizeof(ForLoop));
@@ -579,17 +604,20 @@ static int execute_if(Program *prog, char *args) {
     /* Extract condition */
     int cond_len = then_ptr - ptr;
     char *condition = malloc(cond_len + 1);
-    if (!condition) return 0;
+    if (!condition) {
+        fprintf(stderr, "Error: Failed to allocate memory for condition\n");
+        return 0;
+    }
     memcpy(condition, ptr, cond_len);
     condition[cond_len] = '\0';
     
-    /* Evaluate condition - look for comparison operators */
-    char *eq = strstr(condition, "=");
+    /* Evaluate condition - check multi-character operators FIRST to avoid false matches */
     char *ne = strstr(condition, "<>");
-    char *lt = strstr(condition, "<");
-    char *gt = strstr(condition, ">");
     char *le = strstr(condition, "<=");
     char *ge = strstr(condition, ">=");
+    char *eq = strstr(condition, "=");
+    char *lt = strstr(condition, "<");
+    char *gt = strstr(condition, ">");
     
     bool result = false;
     
@@ -694,18 +722,21 @@ typedef struct {
     StatementHandler handler;
 } StatementEntry;
 
+/* Hash table size - use prime number for better distribution */
+#define HASH_TABLE_SIZE 31
+
 /* Fast hash function for statement keywords - djb2 algorithm */
 static inline unsigned int hash_keyword(const char *str, int len) {
     unsigned int hash = 5381;
     for (int i = 0; i < len; i++) {
         hash = ((hash << 5) + hash) + str[i]; /* hash * 33 + c */
     }
-    return hash;
+    return hash % HASH_TABLE_SIZE;
 }
 
-/* Hash table for O(1) statement dispatch - sorted by frequency for cache efficiency */
-static const StatementEntry statement_table[] = {
-    {"PRINT", 5, execute_print},      /* Most common */
+/* Statement definitions for hashing */
+static const StatementEntry statement_defs[] = {
+    {"PRINT", 5, execute_print},
     {"LET", 3, execute_let},
     {"FOR", 3, execute_for},
     {"NEXT", 4, execute_next},
@@ -722,17 +753,38 @@ static const StatementEntry statement_table[] = {
     {NULL, 0, NULL}
 };
 
-/* Precomputed hash values for fast comparison - computed at compile time would be ideal,
- * but C99 doesn't support constexpr, so we compute once at runtime */
-static unsigned int statement_hashes[14];
-static int hashes_initialized = 0;
+/* Hash table for O(1) statement dispatch with chaining for collisions */
+typedef struct HashNode {
+    const StatementEntry *entry;
+    struct HashNode *next;
+} HashNode;
 
-static void init_statement_hashes(void) {
-    if (hashes_initialized) return;
-    for (int i = 0; statement_table[i].keyword != NULL; i++) {
-        statement_hashes[i] = hash_keyword(statement_table[i].keyword, statement_table[i].len);
+static HashNode *statement_hash_table[HASH_TABLE_SIZE];
+static int hash_table_initialized = 0;
+
+static void init_statement_hash_table(void) {
+    if (hash_table_initialized) return;
+    
+    /* Initialize hash table */
+    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
+        statement_hash_table[i] = NULL;
     }
-    hashes_initialized = 1;
+    
+    /* Insert all statements into hash table with chaining */
+    for (int i = 0; statement_defs[i].keyword != NULL; i++) {
+        const StatementEntry *entry = &statement_defs[i];
+        unsigned int hash = hash_keyword(entry->keyword, entry->len);
+        
+        /* Create new node */
+        HashNode *node = malloc(sizeof(HashNode));
+        if (node) {
+            node->entry = entry;
+            node->next = statement_hash_table[hash];
+            statement_hash_table[hash] = node;
+        }
+    }
+    
+    hash_table_initialized = 1;
 }
 
 /* Internal function to execute a statement within a line */
@@ -740,8 +792,8 @@ static int execute_line_internal(Program *prog, char *text) {
     char *ptr = skip_whitespace(text);
     
     /* Initialize hash table on first use */
-    if (!hashes_initialized) {
-        init_statement_hashes();
+    if (!hash_table_initialized) {
+        init_statement_hash_table();
     }
     
     /* Fast path: check first character for common cases */
@@ -757,34 +809,39 @@ static int execute_line_internal(Program *prog, char *text) {
             scan++;
         }
         
-        /* Compute hash for input keyword */
-        unsigned int input_hash = hash_keyword(ptr, kw_len);
+        /* Compute hash for input keyword - TRUE O(1) hash table lookup */
+        unsigned int hash = hash_keyword(ptr, kw_len);
         
-        /* Hash-based lookup with linear probing for collisions */
-        for (int i = 0; statement_table[i].keyword != NULL; i++) {
-            const char *kw = statement_table[i].keyword;
-            int len = statement_table[i].len;
+        /* Look up in hash table with collision resolution via chaining */
+        HashNode *node = statement_hash_table[hash];
+        while (node) {
+            const StatementEntry *entry = node->entry;
+            const char *kw = entry->keyword;
+            int len = entry->len;
             
-            /* Fast hash comparison first, then string comparison */
-            if (len == kw_len && statement_hashes[i] == input_hash) {
-                if (strncmp(ptr, kw, len) == 0) {
-                    /* Check if it's actually a complete keyword match */
-                    char next_char = ptr[len];
-                    if (next_char == '\0' || isspace(next_char) || next_char == '#' ||
-                        next_char == '"' || next_char == ',' || next_char == '=' || next_char == '(') {
-                        
-                        /* Special cases */
-                        if (kw[0] == 'E' && kw[1] == 'N' && kw[2] == 'D') return 1; /* END */
-                        if (kw[0] == 'R' && kw[1] == 'E' && kw[2] == 'M') return 0; /* REM */
-                        if (kw[0] == 'R' && kw[1] == 'E' && kw[2] == 'T') return execute_return(prog, NULL); /* RETURN */
-                        
-                        /* Call handler */
-                        if (statement_table[i].handler) {
-                            return statement_table[i].handler(prog, ptr + len);
-                        }
+            /* Check if keyword matches */
+            if (len == kw_len && strncmp(ptr, kw, len) == 0) {
+                /* Check if it's actually a complete keyword match */
+                char next_char = ptr[len];
+                if (next_char == '\0' || isspace(next_char) || next_char == '#' ||
+                    next_char == '"' || next_char == ',' || next_char == '=' || next_char == '(') {
+                    
+                    /* Special cases handled with branchless selection */
+                    int is_end = (kw[0] == 'E' && len == 3);
+                    int is_rem = (kw[0] == 'R' && kw[1] == 'E' && kw[2] == 'M' && len == 3);
+                    int is_return = (kw[0] == 'R' && kw[1] == 'E' && kw[2] == 'T' && len == 6);
+                    
+                    if (is_end) return 1;
+                    if (is_rem) return 0;
+                    if (is_return) return execute_return(prog, NULL);
+                    
+                    /* Call handler */
+                    if (entry->handler) {
+                        return entry->handler(prog, ptr + len);
                     }
                 }
             }
+            node = node->next;
         }
     }
     

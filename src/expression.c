@@ -5,6 +5,9 @@
 #include <math.h>
 #include "../include/gwbasic.h"
 
+/* Maximum length for MID$ function when length not specified */
+#define MID_MAX_LENGTH 999999
+
 /* Fast math operations - direct calls for performance */
 double builtin_sin(double x) { return sin(x); }
 double builtin_cos(double x) { return cos(x); }
@@ -250,7 +253,7 @@ static Value *parse_factor(Program *prog, const char **expr) {
                         result->type = VAR_STRING;
                         if (arg->type == VAR_STRING) {
                             int start = (int)value_to_int(arg2);
-                            if (len == -1) len = 999999; /* Large number for rest of string */
+                            if (len == -1) len = MID_MAX_LENGTH; /* Use constant for rest of string */
                             result->value.string_val = builtin_mid(arg->value.string_val, start, len);
                         } else {
                             result->value.string_val = strdup("");
@@ -287,6 +290,16 @@ static Value *parse_factor(Program *prog, const char **expr) {
                 }
                 value_free(arg);
                 return result;
+            } else if (strcmp(name, "ASC") == 0) {
+                /* ASC returns ASCII value of first character of string */
+                result->type = VAR_INTEGER;
+                if (arg->type == VAR_STRING && arg->value.string_val && arg->value.string_val[0]) {
+                    result->value.int_val = (int64_t)(unsigned char)arg->value.string_val[0];
+                } else {
+                    result->value.int_val = 0;
+                }
+                value_free(arg);
+                return result;
             }
             
             /* Math functions */
@@ -301,11 +314,6 @@ static Value *parse_factor(Program *prog, const char **expr) {
             else if (strcmp(name, "ABS") == 0) result->value.double_val = builtin_abs(val);
             else if (strcmp(name, "INT") == 0) result->value.double_val = builtin_int(val);
             else if (strcmp(name, "RND") == 0) result->value.double_val = builtin_rnd(val);
-            else if (strcmp(name, "ASC") == 0) {
-                /* ASC returns ASCII value of first character */
-                result->type = VAR_INTEGER;
-                result->value.int_val = (int64_t)val;
-            }
             else result->value.double_val = 0.0;
             
             return result;
@@ -403,6 +411,11 @@ static Value *parse_expr(Program *prog, const char **expr) {
                 char *r_str = (right->type == VAR_STRING) ? right->value.string_val : "";
                 int len = strlen(l_str ? l_str : "") + strlen(r_str ? r_str : "");
                 char *result = malloc(len + 1);
+                if (!result) {
+                    fprintf(stderr, "Error: Failed to allocate memory for string concatenation\n");
+                    /* Return empty string on allocation failure */
+                    result = strdup("");
+                }
                 if (result) {
                     strcpy(result, l_str ? l_str : "");
                     strcat(result, r_str ? r_str : "");
