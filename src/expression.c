@@ -413,10 +413,9 @@ static Value *parse_expr(Program *prog, const char **expr) {
                 char *result = malloc(len + 1);
                 if (!result) {
                     fprintf(stderr, "Error: Failed to allocate memory for string concatenation\n");
-                    /* Return empty string on allocation failure */
-                    result = strdup("");
-                }
-                if (result) {
+                    /* On allocation failure, set to NULL rather than trying strdup */
+                    result = NULL;
+                } else {
                     strcpy(result, l_str ? l_str : "");
                     strcat(result, r_str ? r_str : "");
                 }

@@ -134,6 +134,11 @@ void symbol_table_set_array(SymbolTable *table, const char *name, int *dims, int
     /* Calculate total size with overflow check */
     size_t total_size = 1;
     for (int i = 0; i < dim_count && i < 8; i++) {
+        /* Validate dimension is positive */
+        if (dims[i] <= 0) {
+            fprintf(stderr, "Error: Array dimension must be positive\n");
+            return;
+        }
         var->dims[i] = dims[i];
         /* Check for overflow before multiplication */
         if (total_size > SIZE_MAX / dims[i]) {

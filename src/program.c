@@ -364,6 +364,7 @@ static int execute_open(Program *prog, char *args) {
             if (prog->files[idx]) {
                 fclose(prog->files[idx]);
             }
+            prog->files[idx] = fopen(filename, mode_str);
             
             /* Check if file was opened successfully */
             if (!prog->files[idx]) {
@@ -777,11 +778,14 @@ static void init_statement_hash_table(void) {
         
         /* Create new node */
         HashNode *node = malloc(sizeof(HashNode));
-        if (node) {
-            node->entry = entry;
-            node->next = statement_hash_table[hash];
-            statement_hash_table[hash] = node;
+        if (!node) {
+            fprintf(stderr, "Error: Failed to allocate hash table node for '%s'\n", entry->keyword);
+            /* Continue initialization - some statements better than none */
+            continue;
         }
+        node->entry = entry;
+        node->next = statement_hash_table[hash];
+        statement_hash_table[hash] = node;
     }
     
     hash_table_initialized = 1;
