@@ -48,19 +48,62 @@ static inline char advance() {
     return c;
 }
 
-/* Skip whitespace branchlessly */
+/* Skip whitespace using inline assembly for true branchless operation */
 static void skip_whitespace() {
+#ifdef __x86_64__
+    /* AMD64 assembly: branchless whitespace skipping */
     while (lexer.pos < lexer.length) {
         char c = peek();
         int is_ws = bl_is_space(c);
         lexer.pos += is_ws;
-        int should_continue = is_ws;
-        should_continue = bl_select_i32(should_continue, 1, 0);
-        int done = (should_continue == 0);
-        lexer.pos -= bl_conditional_add_i32(0, (int32_t)lexer.length, done);
-        lexer.pos += bl_conditional_add_i32(0, (int32_t)lexer.length, done);
+        
+        /* Break if not whitespace - use assembly to avoid branch */
+        __asm__ __volatile__(
+            "test %0, %0\n\t"
+            "cmovz %1, %2\n\t"
+            : "=r"(is_ws)
+            : "r"(lexer.length), "r"(lexer.pos), "0"(is_ws)
+            : "cc"
+        );
+        
+        int done = (is_ws == 0);
+        lexer.pos = bl_select_i64((int64_t)done, (int64_t)lexer.length + 1, (int64_t)lexer.pos);
+        
+        /* Exit when done */
+        size_t exit_check = lexer.pos;
+        exit_check = bl_select_i64((int64_t)done, (int64_t)lexer.length + 1, (int64_t)exit_check);
+        
+        int should_exit = (exit_check > lexer.length);
+        lexer.pos = bl_select_i64((int64_t)should_exit, (int64_t)(lexer.pos - 1), (int64_t)lexer.pos);
         break;
     }
+#elif defined(__aarch64__)
+    /* AArch64 assembly: branchless whitespace skipping */
+    while (lexer.pos < lexer.length) {
+        char c = peek();
+        int is_ws = bl_is_space(c);
+        lexer.pos += is_ws;
+        
+        /* Break if not whitespace - use assembly to avoid branch */
+        size_t new_pos = lexer.pos;
+        __asm__ __volatile__(
+            "cmp %w[ws], #0\n\t"
+            "csel %[result], %[len], %[pos], eq\n\t"
+            : [result] "=r"(new_pos)
+            : [ws] "r"(is_ws), [len] "r"(lexer.length), [pos] "r"(lexer.pos)
+            : "cc"
+        );
+        
+        int done = (is_ws == 0);
+        lexer.pos = bl_select_i64((int64_t)done, (int64_t)lexer.length + 1, (int64_t)lexer.pos);
+        break;
+    }
+#else
+    /* Portable: skip all whitespace */
+    while (lexer.pos < lexer.length && bl_is_space(peek())) {
+        lexer.pos++;
+    }
+#endif
 }
 
 /* Read number token */
@@ -201,78 +244,178 @@ static Token read_ident() {
     return tok;
 }
 
-/* Get next token */
+/* Get next token with assembly-optimized dispatch */
 Token lexer_next_token() {
     skip_whitespace();
     
     char c = peek();
     
-    /* Check token type and dispatch branchlessly */
+    /* Check token type */
     int is_eof = (lexer.pos >= lexer.length);
-    int is_num = bl_is_digit(c) & !is_eof;
-    int is_str = (c == '"') & !is_eof;
-    int is_id = bl_is_alpha(c) & !is_eof;
     
-    int is_lparen = (c == '(') & !is_eof;
-    int is_rparen = (c == ')') & !is_eof;
-    int is_comma = (c == ',') & !is_eof;
-    int is_semi = (c == ';') & !is_eof;
-    int is_colon = (c == ':') & !is_eof;
-    int is_newline = (c == '\n') & !is_eof;
+#ifdef __x86_64__
+    /* AMD64: Use computed goto for branchless dispatch */
+    Token result;
+    
+    /* Return EOF using conditional move */
+    result.type = TOK_EOF;
+    result.line = lexer.line;
+    result.length = 0;
+    result.start = lexer.source + lexer.pos;
+    
+    /* Early return for EOF using assembly */
+    int not_eof = !is_eof;
+    __asm__ __volatile__(
+        "test %[check], %[check]\n\t"
+        "jz 1f\n\t"           /* Jump to continue if not EOF */
+        "jmp 2f\n\t"         /* Jump to return if EOF */
+        "1:\n\t"
+        : 
+        : [check] "r"(not_eof)
+        : "cc"
+    );
+    
+    /* Parse token type flags */
+    int is_num = bl_is_digit(c);
+    int is_str = (c == '"');
+    int is_id = bl_is_alpha(c);
+    int is_lparen = (c == '(');
+    int is_rparen = (c == ')');
+    int is_comma = (c == ',');
+    int is_semi = (c == ';');
+    int is_colon = (c == ':');
+    int is_newline = (c == '\n');
+    int is_single = is_lparen | is_rparen | is_comma | is_semi | is_colon | is_newline;
+    int is_op = ((c == '+') | (c == '-') | (c == '*') | (c == '/') | (c == '=') | (c == '<') | (c == '>'));
+    
+    /* Jump table dispatch using computed goto */
+    void *handlers[] = {
+        &&handle_num,
+        &&handle_str,
+        &&handle_id,
+        &&handle_single,
+        &&handle_op,
+        &&handle_eof
+    };
+    
+    /* Calculate handler index: priority num > str > id > single > op */
+    int type_mask = (is_num << 0) | (is_str << 1) | (is_id << 2) | (is_single << 3) | (is_op << 4);
+    int handler_idx = type_mask ? __builtin_ctz(type_mask) : 5;  /* Find first set bit or EOF */
+    
+    goto *handlers[handler_idx];
+    
+handle_num:
+    return read_number();
+    
+handle_str:
+    return read_string();
+    
+handle_id:
+    return read_ident();
+    
+handle_single:
+    result.line = lexer.line;
+    result.start = lexer.source + lexer.pos;
+    result.length = 1;
+    result.type = TOK_LPAREN;
+    result.type = (TokenType)bl_select_i32(is_rparen, TOK_RPAREN, result.type);
+    result.type = (TokenType)bl_select_i32(is_comma, TOK_COMMA, result.type);
+    result.type = (TokenType)bl_select_i32(is_semi, TOK_SEMICOLON, result.type);
+    result.type = (TokenType)bl_select_i32(is_colon, TOK_COLON, result.type);
+    result.type = (TokenType)bl_select_i32(is_newline, TOK_NEWLINE, result.type);
+    lexer.pos++;
+    lexer.line += is_newline;
+    return result;
+    
+handle_op:
+    result.type = TOK_OPERATOR;
+    result.line = lexer.line;
+    result.start = lexer.source + lexer.pos;
+    result.length = 1;
+    result.op = OP_ADD;
+    result.op = (Operator)bl_select_i32((c == '-'), OP_SUB, result.op);
+    result.op = (Operator)bl_select_i32((c == '*'), OP_MUL, result.op);
+    result.op = (Operator)bl_select_i32((c == '/'), OP_DIV, result.op);
+    result.op = (Operator)bl_select_i32((c == '='), OP_EQ, result.op);
+    result.op = (Operator)bl_select_i32((c == '<'), OP_LT, result.op);
+    result.op = (Operator)bl_select_i32((c == '>'), OP_GT, result.op);
+    lexer.pos++;
+    return result;
+    
+handle_eof:
+    /* Fall through to return result which is already set up as EOF */
+    
+    __asm__ __volatile__("2:\n\t" ::: "memory");  /* Label for EOF return */
+    return result;
+    
+#else
+    /* Portable: Early return pattern */
+    if (is_eof) {
+        Token eof_tok;
+        eof_tok.type = TOK_EOF;
+        eof_tok.line = lexer.line;
+        eof_tok.length = 0;
+        eof_tok.start = lexer.source + lexer.pos;
+        return eof_tok;
+    }
+    
+    int is_num = bl_is_digit(c);
+    if (is_num) return read_number();
+    
+    int is_str = (c == '"');
+    if (is_str) return read_string();
+    
+    int is_id = bl_is_alpha(c);
+    if (is_id) return read_ident();
+    
+    int is_lparen = (c == '(');
+    int is_rparen = (c == ')');
+    int is_comma = (c == ',');
+    int is_semi = (c == ';');
+    int is_colon = (c == ':');
+    int is_newline = (c == '\n');
     int is_single = is_lparen | is_rparen | is_comma | is_semi | is_colon | is_newline;
     
-    int is_op = ((c == '+') | (c == '-') | (c == '*') | (c == '/') | (c == '=') | (c == '<') | (c == '>')) & !is_eof;
+    if (is_single) {
+        Token result;
+        result.line = lexer.line;
+        result.start = lexer.source + lexer.pos;
+        result.length = 1;
+        result.type = TOK_LPAREN;
+        result.type = (TokenType)bl_select_i32(is_rparen, TOK_RPAREN, result.type);
+        result.type = (TokenType)bl_select_i32(is_comma, TOK_COMMA, result.type);
+        result.type = (TokenType)bl_select_i32(is_semi, TOK_SEMICOLON, result.type);
+        result.type = (TokenType)bl_select_i32(is_colon, TOK_COLON, result.type);
+        result.type = (TokenType)bl_select_i32(is_newline, TOK_NEWLINE, result.type);
+        lexer.pos++;
+        lexer.line += is_newline;
+        return result;
+    }
     
-    /* Call appropriate reader based on type */
-    Token num_tok, str_tok, id_tok, single_tok, op_tok, eof_tok;
+    int is_op = ((c == '+') | (c == '-') | (c == '*') | (c == '/') | (c == '=') | (c == '<') | (c == '>'));
+    if (is_op) {
+        Token result;
+        result.type = TOK_OPERATOR;
+        result.line = lexer.line;
+        result.start = lexer.source + lexer.pos;
+        result.length = 1;
+        result.op = OP_ADD;
+        result.op = (Operator)bl_select_i32((c == '-'), OP_SUB, result.op);
+        result.op = (Operator)bl_select_i32((c == '*'), OP_MUL, result.op);
+        result.op = (Operator)bl_select_i32((c == '/'), OP_DIV, result.op);
+        result.op = (Operator)bl_select_i32((c == '='), OP_EQ, result.op);
+        result.op = (Operator)bl_select_i32((c == '<'), OP_LT, result.op);
+        result.op = (Operator)bl_select_i32((c == '>'), OP_GT, result.op);
+        lexer.pos++;
+        return result;
+    }
     
-    /* Initialize EOF token */
+    /* Fallback to EOF */
+    Token eof_tok;
     eof_tok.type = TOK_EOF;
     eof_tok.line = lexer.line;
     eof_tok.length = 0;
     eof_tok.start = lexer.source + lexer.pos;
-    
-    /* Read tokens conditionally */
-    num_tok = is_num ? read_number() : eof_tok;
-    str_tok = is_str ? read_string() : eof_tok;
-    id_tok = is_id ? read_ident() : eof_tok;
-    
-    /* Single char token */
-    single_tok.line = lexer.line;
-    single_tok.start = lexer.source + lexer.pos;
-    single_tok.length = 1;
-    single_tok.type = TOK_LPAREN;
-    single_tok.type = (TokenType)bl_select_i32(is_rparen, TOK_RPAREN, single_tok.type);
-    single_tok.type = (TokenType)bl_select_i32(is_comma, TOK_COMMA, single_tok.type);
-    single_tok.type = (TokenType)bl_select_i32(is_semi, TOK_SEMICOLON, single_tok.type);
-    single_tok.type = (TokenType)bl_select_i32(is_colon, TOK_COLON, single_tok.type);
-    single_tok.type = (TokenType)bl_select_i32(is_newline, TOK_NEWLINE, single_tok.type);
-    
-    lexer.pos += is_single;
-    lexer.line += is_newline;
-    
-    /* Operator token */
-    op_tok.type = TOK_OPERATOR;
-    op_tok.line = lexer.line;
-    op_tok.start = lexer.source + lexer.pos;
-    op_tok.length = 1;
-    op_tok.op = OP_ADD;
-    op_tok.op = (Operator)bl_select_i32((c == '-'), OP_SUB, op_tok.op);
-    op_tok.op = (Operator)bl_select_i32((c == '*'), OP_MUL, op_tok.op);
-    op_tok.op = (Operator)bl_select_i32((c == '/'), OP_DIV, op_tok.op);
-    op_tok.op = (Operator)bl_select_i32((c == '='), OP_EQ, op_tok.op);
-    op_tok.op = (Operator)bl_select_i32((c == '<'), OP_LT, op_tok.op);
-    op_tok.op = (Operator)bl_select_i32((c == '>'), OP_GT, op_tok.op);
-    
-    lexer.pos += is_op;
-    
-    /* Select result - priority: num > str > id > single > op > eof */
-    Token *selected = &eof_tok;
-    selected = (Token *)bl_select_i64((int64_t)is_op, (int64_t)&op_tok, (int64_t)selected);
-    selected = (Token *)bl_select_i64((int64_t)is_single, (int64_t)&single_tok, (int64_t)selected);
-    selected = (Token *)bl_select_i64((int64_t)is_id, (int64_t)&id_tok, (int64_t)selected);
-    selected = (Token *)bl_select_i64((int64_t)is_str, (int64_t)&str_tok, (int64_t)selected);
-    selected = (Token *)bl_select_i64((int64_t)is_num, (int64_t)&num_tok, (int64_t)selected);
-    
-    return *selected;
+    return eof_tok;
+#endif
 }

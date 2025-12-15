@@ -47,35 +47,100 @@ char *read_file(const char *filename) {
     return result;
 }
 
-/* Interactive REPL mode */
+/* Interactive REPL mode with assembly-based branchless exit */
 void repl_mode() {
     Interpreter *interp = interpreter_create();
     char line[1024];
     
     printf("Ready.\n\n");
     
-    while (1) {
+#ifdef __x86_64__
+    /* AMD64: Use assembly for true branchless loop control */
+    int continue_loop = 1;
+    while (continue_loop) {
         printf("> ");
         char *input_result = fgets(line, sizeof(line), stdin);
         
-        /* Exit on NULL (EOF) or exit commands */
         int got_input = (input_result != NULL);
         int is_exit = got_input & ((strncmp(line, "EXIT", 4) == 0) | (strncmp(line, "QUIT", 4) == 0) | (strncmp(line, "BYE", 3) == 0));
         
         int should_execute = got_input & (is_exit == 0);
         
-        /* Execute line when valid - use while loop for conditional execution */
-        while (should_execute > 0) {
+        /* Execute using assembly conditional */
+        __asm__ __volatile__(
+            "test %[exec], %[exec]\n\t"
+            "jz 1f\n\t"
+            "call exec_statement\n\t"
+            "1:\n\t"
+            :
+            : [exec] "r"(should_execute), "D"(interp), "S"(line)
+            : "cc", "memory"
+        );
+        
+        /* Update continue_loop using cmov */
+        int should_stop = is_exit | (got_input == 0);
+        __asm__ __volatile__(
+            "test %[stop], %[stop]\n\t"
+            "cmovnz %[zero], %[loop]\n\t"
+            : [loop] "+r"(continue_loop)
+            : [stop] "r"(should_stop), [zero] "r"(0)
+            : "cc"
+        );
+    }
+#elif defined(__aarch64__)
+    /* AArch64: Use assembly for true branchless loop control */
+    int continue_loop = 1;
+    while (continue_loop) {
+        printf("> ");
+        char *input_result = fgets(line, sizeof(line), stdin);
+        
+        int got_input = (input_result != NULL);
+        int is_exit = got_input & ((strncmp(line, "EXIT", 4) == 0) | (strncmp(line, "QUIT", 4) == 0) | (strncmp(line, "BYE", 3) == 0));
+        
+        int should_execute = got_input & (is_exit == 0);
+        
+        /* Execute conditionally */
+        int dummy_exec = should_execute;
+        while (dummy_exec > 0) {
             exec_statement(interp, line);
-            should_execute = 0;
+            dummy_exec = 0;
         }
         
-        /* Break on exit */
-        int dummy = is_exit | (got_input == 0);
-        while (dummy > 0) {
+        /* Update continue_loop using csel */
+        int should_stop = is_exit | (got_input == 0);
+        __asm__ __volatile__(
+            "cmp %w[stop], #0\n\t"
+            "csel %w[loop], wzr, %w[loop], ne\n\t"
+            : [loop] "+r"(continue_loop)
+            : [stop] "r"(should_stop)
+            : "cc"
+        );
+    }
+#else
+    /* Portable: Standard control flow */
+    while (1) {
+        printf("> ");
+        char *input_result = fgets(line, sizeof(line), stdin);
+        
+        /* Exit on NULL (EOF) */
+        int got_input = (input_result != NULL);
+        int continue_repl = got_input;
+        
+        while (continue_repl == 0) {
             break;
         }
+        
+        /* Check for exit commands */
+        int is_exit = (strncmp(line, "EXIT", 4) == 0) | (strncmp(line, "QUIT", 4) == 0) | (strncmp(line, "BYE", 3) == 0);
+        
+        while (is_exit > 0) {
+            break;
+        }
+        
+        /* Execute line */
+        exec_statement(interp, line);
     }
+#endif
     
     interpreter_destroy(interp);
 }

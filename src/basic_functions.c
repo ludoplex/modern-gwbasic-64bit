@@ -196,19 +196,19 @@ int basic_instr(int start, const char *s1, const char *s2) {
     
     start = bl_clamp_i32(start - 1, 0, len1); /* BASIC uses 1-based indexing */
     
+    int result = 0;
     for (int i = start; i <= len1 - len2; i++) {
         int match = 1;
         for (int j = 0; j < len2; j++) {
             match &= (s1[i + j] == s2[j]);
         }
         
-        int found = match;
-        int result = bl_select_i32(found, i + 1, 0);
-        int should_return = found;
-        i = bl_select_i32(should_return, len1, i);
+        /* Update result if match found and result is still 0 */
+        int should_update = match & (result == 0);
+        result = bl_select_i32(should_update, i + 1, result);
     }
     
-    return 0;
+    return result;
 }
 
 /* STRING$ function - repeat character n times */

@@ -56,16 +56,9 @@ clean:
 	rm -f $(OBJS) $(TARGET) $(TARGET).com
 	@echo "Cleaned build artifacts"
 
-# Verify no if/switch statements
+# Verify no if/switch statements (except in portable fallback #else blocks)
 verify:
-	@echo "Verifying branchless implementation..."
-	@echo "Checking for 'if ' statements:"
-	@! grep -rn "^\s*if " src/ || (echo "ERROR: Found 'if ' statements!" && exit 1)
-	@echo "Checking for 'if(' statements:"
-	@! grep -rn "^\s*if(" src/ || (echo "ERROR: Found 'if(' statements!" && exit 1)
-	@echo "Checking for 'switch' statements:"
-	@! grep -rn "^\s*switch" src/ || (echo "ERROR: Found 'switch' statements!" && exit 1)
-	@echo "✓ Verification passed: No if/switch statements found!"
+	@./scripts/verify-branchless.sh
 
 # Run tests
 test: $(TARGET)

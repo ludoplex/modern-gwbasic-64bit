@@ -74,14 +74,15 @@ static inline size_t arena_remaining(Arena *a) {
 static inline char *arena_strdup(Arena *a, const char *str) {
     size_t len = strlen(str) + 1;
     char *copy = (char *)arena_alloc(a, len);
-    size_t is_null = (copy == NULL);
-    size_t should_copy = (is_null == 0);
     
-    /* Only copy when allocation succeeded (branchless) */
+    /* Return NULL immediately on allocation failure */
+    int is_null = (copy == NULL);
+    
+    /* Only copy when allocation succeeded - mask prevents write to NULL */
     size_t i = 0;
-    while (i < len) {
-        copy[i] = (char)((unsigned char)str[i] & -(should_copy != 0));
-        i += should_copy;
+    while ((i < len) & (is_null == 0)) {
+        copy[i] = str[i];
+        i++;
     }
     
     return copy;
