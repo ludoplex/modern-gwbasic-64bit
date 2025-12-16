@@ -1,3 +1,105 @@
+# Modern GW-BASIC 64-bit - Branchless Edition
+
+This repository contains both a **completely branchless 64-bit GW-BASIC interpreter** implementation and a historical collection of GW-BASIC programs and resources.
+
+## Branchless 64-bit GW-BASIC Interpreter
+
+A cutting-edge, **zero-branch** 64-bit GW-BASIC interpreter built with modern systems programming techniques.
+
+### Key Features
+
+- ✅ **ZERO `if`/`switch` statements** - Completely branchless implementation
+- ✅ **64-bit native** - Full 64-bit integer and floating-point support
+- ✅ **SIMD accelerated** - AVX-512 (x86-64) and NEON (ARM64) optimizations
+- ✅ **Portable** - C99 standard, builds with gcc/clang/cosmocc
+- ✅ **1,685 lines** of branchless C code
+- ✅ **GW-BASIC compatible** - Runs classic GW-BASIC programs
+
+### Quick Start
+
+```bash
+# Build the interpreter
+make
+
+# Verify branchless implementation
+make verify
+
+# Run a program
+./gwbasic examples/hello.bas
+
+# Interactive mode
+./gwbasic
+```
+
+### Example Program
+
+```basic
+10 PRINT "Hello, World!"
+20 PRINT "GW-BASIC in 2025!"
+30 END
+```
+
+### Documentation
+
+- **[IMPLEMENTATION.md](IMPLEMENTATION.md)** - Detailed architecture and implementation guide
+- **[examples/](examples/)** - Example GW-BASIC programs
+- **[src/](src/)** - Source code with extensive comments
+
+### Verification
+
+The implementation uses **ZERO** `if` or `switch` statements:
+
+```bash
+$ make verify
+✓ Verification passed: No if/switch statements found!
+```
+
+### Architecture
+
+```
+src/
+├── branchless_amd64.h      # AVX-512 intrinsics
+├── branchless_aarch64.h    # NEON intrinsics  
+├── branchless_scalar.h     # Portable operations
+├── arena.h                 # Branchless arena allocator
+├── hash_table.h            # Robin Hood hash table
+├── lexer.c/h               # Branchless tokenizer
+├── interpreter.c/h         # Core interpreter
+├── basic_functions.c/h     # Built-in functions
+└── main.c                  # Entry point
+```
+
+### Building
+
+```bash
+# Default build (gcc)
+make
+
+# Build with clang
+make clang
+
+# Build with cosmocc (fat APE binary)
+make cosmo
+
+# Clean build artifacts
+make clean
+```
+
+### Testing
+
+```bash
+# Run verification
+make verify
+
+# Run example programs
+./gwbasic examples/hello.bas
+./gwbasic examples/counting.bas
+./gwbasic examples/multiline.bas
+```
+
+---
+
+## Historical GW-BASIC Program Collection
 
 Hoard of GW-BASIC
 =================

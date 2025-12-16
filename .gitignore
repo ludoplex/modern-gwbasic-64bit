@@ -1,0 +1,18 @@
+# Build artifacts
+*.o
+gwbasic
+gwbasic.com
+
+# Test files
+/tmp/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

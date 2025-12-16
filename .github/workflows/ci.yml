@@ -1,0 +1,187 @@
+name: Branchless GW-BASIC CI
+
+on:
+  push:
+    branches: [ main, copilot/** ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  verify-branchless:
+    name: Verify No If/Switch Statements
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check for if statements (with space)
+      run: |
+        if grep -rEn '^\s*if\s+' src/ | grep -v '#endif'; then
+          echo "ERROR: Found 'if ' statements!"
+          exit 1
+        fi
+        echo "✓ No 'if ' statements found"
+    
+    - name: Check for if statements (with paren)
+      run: |
+        if grep -rEn '^\s*if\(' src/ | grep -v '#endif'; then
+          echo "ERROR: Found 'if(' statements!"
+          exit 1
+        fi
+        echo "✓ No 'if(' statements found"
+    
+    - name: Check for switch statements
+      run: |
+        if grep -rEn '^\s*switch\s*\(' src/; then
+          echo "ERROR: Found 'switch' statements!"
+          exit 1
+        fi
+        echo "✓ No 'switch' statements found"
+    
+    - name: Run make verify
+      run: make verify
+
+  build-test-gcc:
+    name: Build and Test (GCC)
+    runs-on: ubuntu-latest
+    needs: verify-branchless
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential
+    
+    - name: Build with GCC
+      run: |
+        make clean
+        make gcc
+    
+    - name: Test example programs
+      run: |
+        ./gwbasic examples/hello.bas
+        ./gwbasic examples/counting.bas
+        ./gwbasic examples/multiline.bas
+    
+    - name: Verify output
+      run: |
+        output=$(./gwbasic examples/hello.bas 2>&1)
+        if echo "$output" | grep -q "Hello, World!"; then
+          echo "✓ Hello World test passed"
+        else
+          echo "ERROR: Hello World test failed"
+          exit 1
+        fi
+
+  build-test-clang:
+    name: Build and Test (Clang)
+    runs-on: ubuntu-latest
+    needs: verify-branchless
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang
+    
+    - name: Build with Clang
+      run: |
+        make clean
+        make clang
+    
+    - name: Test example programs
+      run: |
+        ./gwbasic examples/hello.bas
+        ./gwbasic examples/counting.bas
+        ./gwbasic examples/multiline.bas
+
+  security-scan:
+    name: Security Scan (CodeQL)
+    runs-on: ubuntu-latest
+    needs: verify-branchless
+    
+    permissions:
+      security-events: write
+      contents: read
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: cpp
+    
+    - name: Build for CodeQL
+      run: make clean && make
+    
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+
+  architecture-compatibility:
+    name: Architecture Compatibility Check
+    runs-on: ubuntu-latest
+    needs: verify-branchless
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check for architecture-specific code
+      run: |
+        echo "Checking AMD64 support..."
+        if ! grep -q "__x86_64__" src/*.c src/*.h; then
+          echo "WARNING: No AMD64-specific code found"
+        else
+          echo "✓ AMD64 code present"
+        fi
+        
+        echo "Checking AArch64 support..."
+        if ! grep -q "__aarch64__" src/*.c src/*.h; then
+          echo "WARNING: No AArch64-specific code found"
+        else
+          echo "✓ AArch64 code present"
+        fi
+        
+        echo "Checking portable fallback..."
+        if ! grep -q "#else" src/*.c src/*.h; then
+          echo "ERROR: No portable fallback found"
+          exit 1
+        else
+          echo "✓ Portable fallback present"
+        fi
+
+  documentation-check:
+    name: Documentation Verification
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check required documentation
+      run: |
+        files=("README.md" "IMPLEMENTATION.md" "VERIFICATION_REPORT.md" "Makefile")
+        for file in "${files[@]}"; do
+          if [ ! -f "$file" ]; then
+            echo "ERROR: Missing required file: $file"
+            exit 1
+          fi
+          echo "✓ Found $file"
+        done
+    
+    - name: Check example programs
+      run: |
+        if [ ! -d "examples" ]; then
+          echo "ERROR: examples/ directory not found"
+          exit 1
+        fi
+        
+        if [ ! -f "examples/hello.bas" ]; then
+          echo "ERROR: examples/hello.bas not found"
+          exit 1
+        fi
+        
+        echo "✓ Documentation and examples verified"
