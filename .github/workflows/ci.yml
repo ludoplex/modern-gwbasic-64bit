@@ -59,6 +59,13 @@ jobs:
         make clean
         make gcc
     
+    - name: Setup APE interpreter (for Cosmo C binaries)
+      run: |
+        sudo wget -O /usr/bin/ape https://cosmo.zip/pub/cosmos/bin/ape-$(uname -m).elf
+        sudo chmod +x /usr/bin/ape
+        sudo sh -c "echo ':APE:M::MZqFpD::/usr/bin/ape:' >/proc/sys/fs/binfmt_misc/register" || true
+        sudo sh -c "echo ':APE-jart:M::jartsr::/usr/bin/ape:' >/proc/sys/fs/binfmt_misc/register" || true
+    
     - name: Test example programs
       run: |
         ./gwbasic examples/hello.bas
@@ -92,6 +99,13 @@ jobs:
       run: |
         make clean
         make clang
+    
+    - name: Setup APE interpreter (for Cosmo C binaries)
+      run: |
+        sudo wget -O /usr/bin/ape https://cosmo.zip/pub/cosmos/bin/ape-$(uname -m).elf
+        sudo chmod +x /usr/bin/ape
+        sudo sh -c "echo ':APE:M::MZqFpD::/usr/bin/ape:' >/proc/sys/fs/binfmt_misc/register" || true
+        sudo sh -c "echo ':APE-jart:M::jartsr::/usr/bin/ape:' >/proc/sys/fs/binfmt_misc/register" || true
     
     - name: Test example programs
       run: |
