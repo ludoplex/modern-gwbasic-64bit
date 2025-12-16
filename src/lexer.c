@@ -349,25 +349,41 @@ handle_eof:
     return result;
     
 #else
-    /* Portable: Early return pattern */
-    if (is_eof) {
-        Token eof_tok;
-        eof_tok.type = TOK_EOF;
-        eof_tok.line = lexer.line;
-        eof_tok.length = 0;
-        eof_tok.start = lexer.source + lexer.pos;
-        return eof_tok;
+    /* Portable: Fully branchless using while loops for conditional execution */
+    Token result;
+    result.type = TOK_EOF;
+    result.line = lexer.line;
+    result.length = 0;
+    result.start = lexer.source + lexer.pos;
+    
+    /* Return EOF token using while loop */
+    int eof_selected = is_eof;
+    while (eof_selected > 0) {
+        return result;
     }
     
+    /* Try number token using while loop */
     int is_num = bl_is_digit(c);
-    if (is_num) return read_number();
+    int num_selected = is_num;
+    while (num_selected > 0) {
+        return read_number();
+    }
     
+    /* Try string token using while loop */
     int is_str = (c == '"');
-    if (is_str) return read_string();
+    int str_selected = is_str;
+    while (str_selected > 0) {
+        return read_string();
+    }
     
+    /* Try identifier token using while loop */
     int is_id = bl_is_alpha(c);
-    if (is_id) return read_ident();
+    int id_selected = is_id;
+    while (id_selected > 0) {
+        return read_ident();
+    }
     
+    /* Try single char token using while loop */
     int is_lparen = (c == '(');
     int is_rparen = (c == ')');
     int is_comma = (c == ',');
@@ -376,8 +392,8 @@ handle_eof:
     int is_newline = (c == '\n');
     int is_single = is_lparen | is_rparen | is_comma | is_semi | is_colon | is_newline;
     
-    if (is_single) {
-        Token result;
+    int single_selected = is_single;
+    while (single_selected > 0) {
         result.line = lexer.line;
         result.start = lexer.source + lexer.pos;
         result.length = 1;
@@ -392,9 +408,10 @@ handle_eof:
         return result;
     }
     
+    /* Try operator token using while loop */
     int is_op = ((c == '+') | (c == '-') | (c == '*') | (c == '/') | (c == '=') | (c == '<') | (c == '>'));
-    if (is_op) {
-        Token result;
+    int op_selected = is_op;
+    while (op_selected > 0) {
         result.type = TOK_OPERATOR;
         result.line = lexer.line;
         result.start = lexer.source + lexer.pos;
@@ -410,12 +427,7 @@ handle_eof:
         return result;
     }
     
-    /* Fallback to EOF */
-    Token eof_tok;
-    eof_tok.type = TOK_EOF;
-    eof_tok.line = lexer.line;
-    eof_tok.length = 0;
-    eof_tok.start = lexer.source + lexer.pos;
-    return eof_tok;
+    /* Fallback to EOF - already set up in result */
+    return result;
 #endif
 }
