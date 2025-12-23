@@ -41,63 +41,50 @@ jobs:
     - name: Run make verify
       run: make verify
 
-  build-test-gcc:
-    name: Build and Test (GCC)
+  build-test-cosmo:
+    name: Build and Test (Cosmo C APE Binary)
     runs-on: ubuntu-latest
     needs: verify-branchless
     
     steps:
     - uses: actions/checkout@v4
     
-    - name: Install dependencies
+    - name: Install Cosmo C toolchain
       run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential
+        mkdir -p /tmp/cosmo
+        cd /tmp/cosmo
+        wget -q https://cosmo.zip/pub/cosmocc/cosmocc.zip
+        unzip -q cosmocc.zip
+        echo "/tmp/cosmo/bin" >> $GITHUB_PATH
     
-    - name: Build with GCC
+    - name: Build with Cosmo C
       run: |
+        export PATH="/tmp/cosmo/bin:$PATH"
         make clean
-        make gcc
+        make cosmo
+    
+    - name: Setup APE interpreter (for testing APE binary)
+      run: |
+        sudo wget -O /usr/bin/ape https://cosmo.zip/pub/cosmos/bin/ape-$(uname -m).elf
+        sudo chmod +x /usr/bin/ape
+        sudo sh -c "echo ':APE:M::MZqFpD::/usr/bin/ape:' >/proc/sys/fs/binfmt_misc/register" || true
+        sudo sh -c "echo ':APE-jart:M::jartsr::/usr/bin/ape:' >/proc/sys/fs/binfmt_misc/register" || true
     
     - name: Test example programs
       run: |
-        ./gwbasic examples/hello.bas
-        ./gwbasic examples/counting.bas
-        ./gwbasic examples/multiline.bas
+        ./gwbasic.com examples/hello.bas
+        ./gwbasic.com examples/counting.bas
+        ./gwbasic.com examples/multiline.bas
     
     - name: Verify output
       run: |
-        output=$(./gwbasic examples/hello.bas 2>&1)
+        output=$(./gwbasic.com examples/hello.bas 2>&1)
         if echo "$output" | grep -q "Hello, World!"; then
           echo "✓ Hello World test passed"
         else
           echo "ERROR: Hello World test failed"
           exit 1
         fi
-
-  build-test-clang:
-    name: Build and Test (Clang)
-    runs-on: ubuntu-latest
-    needs: verify-branchless
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y clang
-    
-    - name: Build with Clang
-      run: |
-        make clean
-        make clang
-    
-    - name: Test example programs
-      run: |
-        ./gwbasic examples/hello.bas
-        ./gwbasic examples/counting.bas
-        ./gwbasic examples/multiline.bas
 
   security-scan:
     name: Security Scan (CodeQL)
