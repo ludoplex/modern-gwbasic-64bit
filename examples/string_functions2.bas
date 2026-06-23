@@ -1,0 +1,9 @@
+10 REM Test CHR$, STR$, VAL functions
+20 PRINT "CHR$(65) = "
+30 PRINT CHR$(65)
+40 PRINT "STR$(42) = "
+50 PRINT STR$(42)
+60 LET A$ = "123.45"
+70 PRINT "VAL(""123.45"") = "
+80 PRINT VAL(A$)
+90 END

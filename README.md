@@ -7,6 +7,24 @@ Hoard of GW-BASIC
 This repository is a collection of programs, tutorials and other resources on GW-BASIC for the PC, Tandy and PCjr.
 It focuses on source code, supporting files and documentation only. Compiled binaries and sources in other BASIC dialects are generally omitted.
 
+## Modern GW-BASIC 64-bit Interpreter
+
+This repository now includes a **modern 64-bit GW-BASIC interpreter** with an assembly-optimized core engine for AMD64 and ARM64 architectures! See [INTERPRETER.md](INTERPRETER.md) for full documentation.
+
+### Quick Start
+
+```bash
+make              # Build the interpreter
+./gwbasic         # Run in interactive mode
+./gwbasic file.bas  # Run a BASIC program
+```
+
+The interpreter features:
+- Native 64-bit architecture support (AMD64 and ARM64)
+- Assembly-optimized arithmetic operations
+- Classic GW-BASIC interactive programming
+- Compatible with original GW-BASIC syntax
+
 Materials from the following sources are included:
 
 Programs

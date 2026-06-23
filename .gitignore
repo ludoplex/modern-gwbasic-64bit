@@ -1,0 +1,24 @@
+# Build artifacts
+*.o
+gwbasic
+
+# Rust build artifacts
+rust_benchmarks/target/
+rust_benchmarks/Cargo.lock
+
+# CodeQL artifacts
+_codeql_detected_source_root
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+/tmp/

@@ -1,0 +1,22 @@
+[package]
+name = "gwbasic_benchmarks"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "for_loop"
+path = "src/for_loop.rs"
+
+[[bin]]
+name = "math_functions"
+path = "src/math_functions.rs"
+
+[[bin]]
+name = "string_ops"
+path = "src/string_ops.rs"
+
+[[bin]]
+name = "performance"
+path = "src/performance.rs"
+
+[dependencies]

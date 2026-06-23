@@ -1,0 +1,13 @@
+10 REM Test string functions
+20 LET A$ = "Hello World"
+30 PRINT "String: "
+40 PRINT A$
+50 PRINT "LEN = "
+60 PRINT LEN(A$)
+70 PRINT "LEFT$(5) = "
+80 PRINT LEFT$(A$, 5)
+90 PRINT "RIGHT$(5) = "
+100 PRINT RIGHT$(A$, 5)
+110 PRINT "MID$(7,5) = "
+120 PRINT MID$(A$, 7, 5)
+130 END
